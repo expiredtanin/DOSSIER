@@ -356,6 +356,12 @@ Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG b
 ![b4-hinweistext-eg-100-nachher.png](review-269/b4-hinweistext-eg-100-nachher.png)
 
 
+## [296] Plakat-Reste: Marken der gewählten Schnitte, nur Gesamtmass
+
+**plakat.png** — Wettbewerb-Plakat A1 quer (Browser-Build, Chromium/Linux; 64 Farben): Marken A-A/B-B an den Grundrissen, nur die Gesamtmass-Kette je Seite, Tabellen auf Blatt 1.
+
+![plakat.png](review-296/plakat.png)
+
 ## [266] Wettbewerb durchgespielt (Plakat, Kennzahlen, 3D-Dokument)
 
 **r1-plakat-a1.png**

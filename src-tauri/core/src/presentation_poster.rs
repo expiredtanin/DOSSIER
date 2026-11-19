@@ -297,6 +297,13 @@ fn layout_variant(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bo
                 placed = Some(Placed { page, rect, forced: false, line: line_at(&tops, page, rect.y_mm) });
             }
         }
+        // [296] Liegt die letzte Zeile schon auf einem späteren Blatt, füllen die Tabellen zuerst freie Spalten der früheren Blätter
+        // (sonst wandern sie aufs zweite Blatt, obwohl oben Platz ist).
+        if placed.is_none() && row.is_none() && st.page > 0 {
+            if let Some((page, rect)) = table_slot(g, &busy, st.page, pref, h) {
+                placed = Some(Placed { page, rect, forced: false, line: line_at(&tops, page, rect.y_mm) });
+            }
+        }
         if let Some(sd) = st.side.as_mut().filter(|_| placed.is_none()) {
             let span = pref.min(g.cols - sd.col);
             if span >= 2.min(pref) && sd.y + h <= g.bottom + 1e-9 {
@@ -572,6 +579,17 @@ mod tests {
         assert_eq!(r.pages, 1, "{r:?}");
         check(&g, &r);
         assert!(r.items.iter().chain(&r.tables).chain(&r.image).all(|p| !p.forced));
+    }
+
+    /// [296] Die letzte Zeile liegt auf dem zweiten Blatt, oben sind Spalten frei: die Tabellen füllen zuerst diese freien Spalten.
+    #[test]
+    fn tabellen_fuellen_freie_spalten_frueherer_blaetter() {
+        let g = a1();
+        let groups = vec![Group { cells: vec![Cell { span: 2, w: 200.0, h: 150.0 }], image_beside: false }, Group { cells: vec![Cell { span: 4, w: 500.0, h: 400.0 }], image_beside: false }];
+        let r = layout(&g, &groups, &[(3, 60.0), (3, 60.0)], false, 70.0);
+        assert_eq!(r.items[1].page, 1, "{r:?}");
+        assert!(r.tables.iter().all(|t| t.page == 0), "{r:?}");
+        check(&g, &r);
     }
 
     /// [266] Freier Platz am Fuss wird gleichmässig auf die Zeilen verteilt (oben, zwischen, unten gleiche Lücke); Elemente

@@ -22,6 +22,9 @@ const SECTION_LINE_MARK_MM: f64 = 0.5;
 const SECTION_LINE_DASH: [f64; 4] = super::line_pattern::SECTION_LINE;
 /// [176] Beschriftungshöhe in Papier-mm (Modell-Meter = mm · Massstab/1000).
 const SECTION_LABEL_MM: f64 = 3.5;
+/// [296] Präsentationsblatt: so weit (Papier-mm) darf eine Schnitt-/Ansichtslinie über das Haus hinausreichen; mit ihrer Marke
+/// (`MARKS_MARGIN_MM`) bleibt sie im Ausschnitt des Plakats (`MARKS_REACH_MM`) und bläht ein gewöhnliches Blatt kaum auf.
+const SECTION_OVERSHOOT_MM: f64 = 15.0;
 
 /// [276] Farbe, Strichstärken und Linientyp einer Schnitt-/Ansichtslinie: Stift (aktiver Stiftsatz) > Linientyp > Basis.
 struct LineInk {
@@ -1109,6 +1112,51 @@ fn view_marker(c: &Ctx, level: &DrawingLevel, p0: Vec2, p1: Vec2, sign: f64, k: 
     }
 }
 
+/// [296] Umriss aller Gebäuderinge, rundum um `pad` Meter erweitert; `None` ohne Gebäude.
+fn house_box(rings: &[Vec<Vec2>], pad: f64) -> Option<[f64; 4]> {
+    let mut b: Option<[f64; 4]> = None;
+    for q in rings.iter().flatten().filter(|q| q.x.is_finite() && q.y.is_finite()) {
+        b = Some(b.map_or([q.x, q.y, q.x, q.y], |b| [b[0].min(q.x), b[1].min(q.y), b[2].max(q.x), b[3].max(q.y)]));
+    }
+    b.map(|b| [b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])
+}
+
+/// [296] Anfang und Ende eines Linienzugs auf den Kasten `bx` kürzen (nur das erste und das letzte Stück; schneidet es den Kasten
+/// nicht, bleibt es unverändert).
+fn clip_ends(path: &mut [(f64, f64)], bx: [f64; 4]) {
+    let n = path.len();
+    if n < 2 {
+        return;
+    }
+    // Parameterbereich [t0, t1] des Stücks a→b innerhalb des Kastens (Liang-Barsky).
+    let range = |a: (f64, f64), b: (f64, f64)| -> Option<(f64, f64)> {
+        let (mut t0, mut t1) = (0.0_f64, 1.0_f64);
+        for (d, lo, hi, o) in [(b.0 - a.0, bx[0], bx[2], a.0), (b.1 - a.1, bx[1], bx[3], a.1)] {
+            if d.abs() < 1e-12 {
+                if o < lo || o > hi {
+                    return None;
+                }
+            } else {
+                let (u, v) = ((lo - o) / d, (hi - o) / d);
+                t0 = t0.max(u.min(v));
+                t1 = t1.min(u.max(v));
+            }
+        }
+        (t0 < t1).then_some((t0, t1))
+    };
+    let at = |a: (f64, f64), b: (f64, f64), t: f64| (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+    let (a, b) = (path[0], path[1]);
+    let first = range(a, b);
+    let (c, d) = (path[n - 2], path[n - 1]);
+    let last = range(c, d);
+    if let Some((t0, _)) = first {
+        path[0] = at(a, b, t0);
+    }
+    if let Some((_, t1)) = last {
+        path[n - 1] = at(c, d, t1);
+    }
+}
+
 /// Schnittführungs-Symbole aller Schnitt-/Ansichtsebenen mit Linie (`addSectionLines`).
 pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     if !c.derived_shown(SECTION_LINE_CATEGORY) {
@@ -1130,7 +1178,10 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
     // [270] Erst die Schnitte, dann die Ansichtsmarken: diese weichen den Schnittmarken aus (`view_marker`).
     let sections = c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Section));
     let elevations = c.p.drawing_levels.iter().filter(|l| matches!(l.kind, DrawingLevelKind::Elevation));
-    for level in sections.chain(elevations) {
+    // [296] Auswahl der Marken: Einträge `91:<Ebenen-Id>` in `show` (Präsentationsblatt) beschränken die Marken auf diese Ebenen;
+    // ohne solche Einträge zeigt die Klasse alle.
+    let only: Vec<&str> = c.a.show.iter().filter_map(|k| k.strip_prefix("91:")).collect();
+    for level in sections.chain(elevations).filter(|l| only.is_empty() || only.contains(&l.id.as_str())) {
         let Some([p0, p1]) = level.line_points else { continue };
         let tag = section_label_tag(&level.name);
         let label_w = crate::text_layout::text_width_em(&tag, false) * SECTION_LABEL_MM * k;
@@ -1143,6 +1194,13 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
         let mut path: Vec<(f64, f64)> = vec![(p0.x, p0.y)];
         path.extend(level.bend_points.iter().flatten().map(|q| (q.x, q.y)));
         path.push((p1.x, p1.y));
+        // [296] Präsentationsblatt: Enden, die weit über das Haus hinausreichen, werden gekürzt (die Linie bleibt ganz und samt Marken
+        // im Ausschnitt statt am Rand abgeschnitten).
+        if !only.is_empty() {
+            if let Some(bx) = house_box(c.house_rings(), SECTION_OVERSHOOT_MM * k) {
+                clip_ends(&mut path, bx);
+            }
+        }
         let look = c.mv().mark_look(level);
         let ink = line_ink(c.p, level, &look);
         let marked = look.marked_ends();
@@ -1522,6 +1580,42 @@ mod tests {
         assert_eq!(count_parts(&via_mv), (0, 4, 0, 2), "Vorgabe der Modelldarstellung");
         let ebene = run_lines(&look_project("section", serde_json::json!({ "marker": "arrow", "lineMode": "full" }), Some(mvl)), true);
         assert_eq!(count_parts(&ebene), (1, 4, 2, 2), "Ebene geht vor");
+    }
+
+    /// [296] Enden, die weit über das Haus hinausreichen, werden auf den Kasten gekürzt; Stücke ausserhalb bleiben.
+    #[test]
+    fn linienenden_auf_kasten_kuerzen() {
+        let v = |x: f64, y: f64| Vec2 { x, y };
+        let bx = house_box(&[vec![v(0.0, 0.0), v(10.0, 0.0), v(10.0, 8.0), v(0.0, 8.0)]], 2.0).unwrap();
+        assert_eq!(bx, [-2.0, -2.0, 12.0, 10.0]);
+        let mut p = [(-50.0, 4.0), (60.0, 4.0)];
+        clip_ends(&mut p, bx);
+        assert!((p[0].0 + 2.0).abs() < 1e-9 && (p[1].0 - 12.0).abs() < 1e-9 && p[0].1 == 4.0, "{p:?}");
+        let mut inside = [(1.0, 1.0), (5.0, 5.0)];
+        clip_ends(&mut inside, bx);
+        assert_eq!(inside, [(1.0, 1.0), (5.0, 5.0)]);
+        let mut away = [(100.0, 100.0), (200.0, 100.0)];
+        clip_ends(&mut away, bx);
+        assert_eq!(away, [(100.0, 100.0), (200.0, 100.0)]);
+    }
+
+    /// [296] Einträge `91:<Id>` in `show` beschränken die Marken auf die gewählten Schnitte/Ansichten.
+    #[test]
+    fn marken_nur_der_gewaehlten_ebenen() {
+        let mut p = look_project("section", serde_json::json!({}), None);
+        let mut b = p.drawing_levels[0].clone();
+        b.id = "t".into();
+        b.name = "Schnitt B-B".into();
+        p.drawing_levels.push(b);
+        let run = |show: &str| {
+            let a = super::super::domains::PlanArgs::parse(1.0, &format!(r#"{{"show": [{show}], "scale": 100, "global": true}}"#)).unwrap();
+            let mut out = Vec::new();
+            plan_section_lines(&Ctx::new(&p, &a), &mut out);
+            out.iter().filter(|q| matches!(q, Primitive::DrawingText { .. })).count()
+        };
+        assert_eq!(run(r#""02", "90""#), 4, "ohne Auswahl alle");
+        assert_eq!(run(r#""02", "90", "91:t""#), 2, "nur B-B");
+        assert_eq!(run(r#""02", "90", "91:s", "91:t""#), 4);
     }
 
     /// [276] Varianten im Grundriss: Linie keine/Enden, Dreieck, nur Anfang, ohne Beschriftung; Pick-Band bleibt immer.

@@ -5,7 +5,7 @@ import { generatePlan } from "./generatePlan";
 import { getState } from "../state/appStore";
 import { sheetSizeMm } from "../model/layoutModel";
 import { posterMetrics } from "../model/posterTemplates";
-import { finerPresentationScale, fittingPresentationScale, POSTER_EXTRAS_DEFAULT, posterExtrasDefault, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
+import { POSTER_MODEL_VIEW_ID, finerPresentationScale, fittingPresentationScale, POSTER_EXTRAS_DEFAULT, posterExtrasDefault, PRESENTATION_TEMPLATE_ID, levelHasContent, planPresentationSheet, presentationDefaults, presentationSheetOps } from "./presentationSheet";
 import type { Project } from "../model/types";
 
 const LABELS = {
@@ -414,6 +414,47 @@ describe("[66] Präsentationsplan", () => {
     st().applyChange(none.ops);
     expect(st().project.viewSnapshots!.find((v) => v.id === "vs-pres-m2-0")!.layerVisibility["91"]).toBe(false);
   }, 60_000);
+
+  // [296] Nur die Marken der gewählten Schnitte/Ansichten; auch auf einem Blatt ohne Plakat; Plakat: nur Gesamtmass.
+  it("[296] Plakat: Marken nur der gewählten Schnitte", () => {
+    const sections = project.drawingLevels.filter((l) => l.kind === "section").map((l) => l.id);
+    expect(sections.length).toBeGreaterThanOrEqual(2);
+    const floors = project.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId && levelHasContent(project, l.id)).slice(0, 1).map((l) => l.id);
+    for (const poster of ["poster-a1-landscape"]) {
+      st().loadProject(buildComplexSampleProject());
+      const base = { floors, elevationIds: [], scale: 200, sectionIds: [sections[0]], paper: "a1" as const, orientation: "landscape" as const, sketch: false, ...(poster ? { poster } : {}) };
+      const res = presentationSheetOps(st().project, base, LABELS, "k1")!;
+      st().applyChange(res.ops);
+      const q = st().project;
+      const lay = q.layouts!.find((l) => l.id === res.layoutId)!;
+      const vis = q.viewSnapshots!.find((v) => v.id === lay.viewports[0].snapshotId)!.layerVisibility;
+      expect(vis["91"]).toBe(true);
+      expect(vis[`91:${sections[0]}`]).toBe(true);
+      expect(vis[`91:${sections[1]}`]).toBeUndefined();
+    }
+  }, 60_000);
+
+  it("[296] Plakat: Grundrisse zeigen nur die Gesamtmass-Kette (Modelldarstellung), die Ketten im Arbeitsgrundriss bleiben", () => {
+    st().loadProject(buildWettbewerbSampleProject());
+    const p = st().project;
+    const floors = p.drawingLevels.filter((l) => l.kind === "floor" && !l.layoutId && levelHasContent(p, l.id)).slice(0, 1).map((l) => l.id);
+    const base = { floors, elevationIds: [], scale: 200, sectionIds: [], paper: "a1" as const, orientation: "landscape" as const, sketch: false };
+    const nAuto = p.drawings2d.filter((d) => d.id.startsWith("autodim-")).length;
+    expect(nAuto).toBeGreaterThan(0);
+    const res = presentationSheetOps(p, { ...base, poster: "poster-a1-landscape" }, LABELS, "g1")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    expect(q.drawings2d.filter((d) => d.id.startsWith("autodim-")).length).toBe(nAuto);
+    const mv = q.modelViewOptions!.find((m) => m.id === POSTER_MODEL_VIEW_ID)!;
+    expect(mv.dimensions?.chains).toBe("total");
+    const lay = q.layouts!.find((l) => l.id === res.layoutId)!;
+    expect(q.viewSnapshots!.find((v) => v.id === lay.viewports[0].snapshotId)!.modelViewOptionId).toBe(POSTER_MODEL_VIEW_ID);
+    // Gewöhnliches Blatt: keine eigene Modelldarstellung.
+    st().loadProject(buildWettbewerbSampleProject());
+    const plain = presentationSheetOps(st().project, base, LABELS, "g2")!;
+    st().applyChange(plain.ops);
+    expect(st().project.modelViewOptions?.some((m) => m.id === POSTER_MODEL_VIEW_ID) ?? false).toBe(false);
+  }, 90_000);
 
   it("[266] Aussenbemassung wird für Grundrisse ohne Ketten ergänzt, vorhandene bleiben", () => {
     const strip = { ...project, drawings2d: project.drawings2d.filter((d) => !d.id.startsWith("autodim-")) };

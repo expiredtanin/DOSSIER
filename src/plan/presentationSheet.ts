@@ -18,6 +18,7 @@ import type {
   LayoutPaperFormat,
   LayoutViewport,
   MasterLayout,
+  ModelViewOption,
   Project,
   ViewSnapshot,
   ViewTemplate,
@@ -82,6 +83,9 @@ export const POSTER_SITUATION_SCALE = 500;
 /** Id der Standard-Ansichtsvorlage „Situation WBW 1:500“ und ihrer Modelldarstellung (`standards.rs`). */
 export const SITUATION_TEMPLATE_ID = "std-vt-situation-wbw";
 const SITUATION_MODEL_VIEW_ID = "std-mv-situation-wbw";
+/** [296] Modelldarstellung der Plakat-Grundrisse: nur die Gesamtmass-Kette der Aussenbemassung, sonst wie der Ausschnitt. */
+export const POSTER_MODEL_VIEW_ID = "mv-pres-plakat";
+const posterModelView = (): ModelViewOption => ({ id: POSTER_MODEL_VIEW_ID, name: "Plakat (Gesamtmass)", dimensions: { chains: "total" } });
 /** Spalten der Kennzahlen-Tabelle: Fläche je Geschoss mit HNF/NNF/NF/VF/FF, GF und GV. */
 const AREAS_COLUMNS = ["name", "hnf", "nnf", "nf", "vf", "ff", "gf", "gv"];
 
@@ -221,12 +225,16 @@ function categoryCodes(cats: readonly LayerCategory[], out: string[] = []): stri
  * Umgebung (Kataster, Strassen, Baurecht, Gelände, Höhenlinien — dafür gibt es den Situationsplan): sonst
  * bestimmen Parzelle und Geländemodell Grösse und Massstab jeder Zeichnung.
  */
-function presentationVisibility(project: Project, t: ViewTemplate, marks = false): Record<string, boolean> {
+function presentationVisibility(project: Project, t: ViewTemplate, marks: readonly string[] = []): Record<string, boolean> {
   const vis: Record<string, boolean> = {};
   for (const c of categoryCodes(project.layers)) vis[c] = true;
   const out: Record<string, boolean> = { ...vis, ...(t.layerVisibility ?? {}) };
   // [266] Schnitt- und Ansichtsmarken im Grundriss, wenn das Blatt Schnitte/Ansichten zeigt (die Vorlage blendet sie sonst aus).
-  if (marks) out[SECTION_MARK_CATEGORY] = true;
+  // [296] Nur die Marken der gewählten Schnitte/Ansichten: Einträge `91:<Ebenen-Id>` (Kern: `plan_section_lines`).
+  if (marks.length) {
+    out[SECTION_MARK_CATEGORY] = true;
+    for (const id of marks) out[`${SECTION_MARK_CATEGORY}:${id}`] = true;
+  }
   for (const c of siteCodes(project)) out[c] = false;
   return out;
 }
@@ -334,11 +342,15 @@ function posterTextMetrics(size: { w: number; h: number }): { sizeMm: number; dy
 }
 
 /**
- * [266] Zeigt das Plakat Schnitte oder Ansichten (dann stehen deren Marken in den Grundrissen)? Nur beim Plakat: dort gibt der
- * Kern jedem Grundriss einen Ausschnitt um das Haus (mit Platz für die Marken); ein gewöhnliches Blatt zeigt das ganze Ausmass,
- * und Marken weit vom Haus würden die Pläne vergrössern. Die Marken folgen den Linien des Projekts (auch ungewählter Schnitte).
+ * [266] Ebenen, deren Marken in den Grundrissen stehen: die gewählten Schnitte und Ansichten (nicht die übrigen des Projekts [296]).
+ * Nur beim Plakat: dort gibt der Kern jedem Grundriss einen Ausschnitt um das Haus (mit Platz für die Marken); ein gewöhnliches
+ * Blatt zeigt das ganze Ausmass, und die Marken blähten es in Papier-mm auf (kleine Blätter/Massstäbe passten nicht mehr). Leer ⇒ keine Marken.
  */
-const showsMarks = (o: PresentationOptions) => !!o.poster && (o.elevationIds.length > 0 || (o.sectionIds ?? []).length > 0);
+const markLevelIds = (project: Project, o: PresentationOptions): string[] => (!o.poster ? [] : [...o.elevationIds, ...(o.sectionIds ?? [])]).filter((id) => {
+  const k = project.drawingLevels.find((l) => l.id === id)?.kind;
+  return k === "section" || k === "elevation";
+});
+const showsMarks = (project: Project, o: PresentationOptions) => !!o.poster && markLevelIds(project, o).length > 0;
 
 /**
  * [282] Passt der Präsentationsplan im gewählten Massstab nicht aufs Blatt: der grösste gemeinsame Massstab (kleinster
@@ -379,7 +391,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
   // Plakat: Kopfzeile und Ränder der Vorlage, kein Schriftfeld des Masters.
   const poster = o.poster && posterTemplate(o.poster) ? posterMetrics(size.w, size.h) : null;
   const levels = chosenLevels(project, o);
-  const vis = presentationVisibility(project, template, showsMarks(o));
+  const vis = presentationVisibility(project, template, markLevelIds(project, o));
   let posterReq: Record<string, unknown> | undefined;
   if (poster) {
     const ex = o.extras;
@@ -410,7 +422,7 @@ export function planPresentationSheet(project: Project, o: PresentationOptions):
     template,
     ...(o.scale ? { scale: o.scale } : {}),
     scales: o.scales ?? {},
-    ...(showsMarks(o) ? { marks: true } : {}),
+    ...(showsMarks(project, o) ? { marks: true } : {}),
     ...(poster ? { marginMm: poster.marginMm, topMm: poster.contentTopMm } : {}),
     ...(posterReq ? { poster: posterReq } : {}),
   });
@@ -587,6 +599,8 @@ export function presentationSheetOps(
     const mv = standardModelViews(project).find((m) => m.id === SITUATION_MODEL_VIEW_ID);
     if (mv) ops.push(...addItems("modelViewOptions", [mv]));
   }
+  // [296] Plakat: Grundrisse mit nur dem Gesamtmass (die Ketten im Arbeitsgrundriss bleiben).
+  if (o.poster && !(project.modelViewOptions ?? []).some((m) => m.id === POSTER_MODEL_VIEW_ID)) ops.push(...addItems("modelViewOptions", [posterModelView()]));
   const pages = Math.max(1, plan.pages ?? 1);
   const layoutIds = Array.from({ length: pages }, (_, k) => (k === 0 ? `lay-pres-${stamp}` : `lay-pres-${stamp}-${k + 1}`));
   const size = sheetSizeMm(sheet.paper, sheet.orientation);
@@ -596,7 +610,7 @@ export function presentationSheetOps(
     masterId: master.id,
   }));
   const sheetLevels = layouts.map((l) => createSheetLevel(`sheet-${l.id}`, l));
-  const vis = presentationVisibility(project, template, showsMarks(o));
+  const vis = presentationVisibility(project, template, markLevelIds(project, o));
   const cat = annotationCategory(project);
   const byId = new Map(project.drawingLevels.map((l) => [l.id, l]));
   const snaps: ViewSnapshot[] = [];
@@ -629,6 +643,7 @@ export function presentationSheetOps(
       ...(!isSit && template.enabledOverrideRuleIds ? { enabledOverrideRuleIds: [...template.enabledOverrideRuleIds] } : {}),
       templateId: t.id,
       templateLinked: true,
+      ...(o.poster && !isSit && it.group === 0 ? { modelViewOptionId: POSTER_MODEL_VIEW_ID } : {}),
     } as ViewSnapshot);
     vps[page].push({
       id: `vp-pres-${stamp}-${i}`,
