@@ -115,6 +115,20 @@ export function WallSection({
           width={120}
         />
       </div>
+      {/* OK bis Decke ([292]): Oberkante an der Unterkante der Decke des Geschosses, auch geneigt. */}
+      <div className="objinfo-field">
+        <span className="objinfo-flabel">{t("objinfo.wall.ceilingAttach")}</span>
+        <Dropdown
+          value={wall.ceilingAttach ? "on" : "off"}
+          onChange={(v) => host.onSetWallCeilingAttach(v === "on")}
+          options={[
+            { value: "off", label: t("objinfo.wall.ceilingAttach.off") },
+            { value: "on", label: t("objinfo.wall.ceilingAttach.on") },
+          ]}
+          title={t("objinfo.wall.ceilingAttach.tip")}
+          width={120}
+        />
+      </div>
       <BuildingFlags isExternal={wall.isExternal} loadBearing={wall.loadBearing} host={host} />
 
       {/* Aufbau-Typ-Segment. */}

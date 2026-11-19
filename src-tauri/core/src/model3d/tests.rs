@@ -1209,3 +1209,64 @@ fn entourage_pick_im_3d() {
     assert!((top - (base + 1.75)).abs() < 1e-9, "{top}");
     assert!(mine[0].tris.iter().flatten().all(|q| (q[0] - 4.0).abs() < 1.0 && (q[2] + 3.0).abs() < 1.0));
 }
+
+/// [292] Wand W2 (x = 5, y 0…4) mit `ceilingAttach` unter einer Decke, die weit über die Wand reicht; `slope`: Gefälle
+/// der Decke (`rise` über die Länge 4 in +y, `None` = waagrecht), `hole`: Aussparung im Deckenumriss.
+fn wall_under_ceiling(attach: bool, with_ceiling: bool, slope: Option<f64>, hole: Option<[f64; 4]>) -> (Project, Vec<RWall>, f64, f64) {
+    let mut p = sample();
+    p.walls.retain(|w| w.id == "W2");
+    p.openings = Some(vec![]);
+    p.walls[0].ceiling_attach = attach.then_some(true);
+    let mut c = p.ceilings.as_ref().unwrap()[0].clone();
+    c.outline = [(0.0, -1.0), (8.0, -1.0), (8.0, 5.0), (0.0, 5.0)].iter().map(|&(x, y)| Vec2 { x, y }).collect();
+    c.slope = slope.map(|r| CeilingSlope { from: Vec2 { x: 5.0, y: 0.0 }, to: Vec2 { x: 5.0, y: 4.0 }, rise: r, ramp: None, extra: Default::default() });
+    c.openings = hole.map(|h| vec![[(h[0], h[1]), (h[2], h[1]), (h[2], h[3]), (h[0], h[3])].iter().map(|&(x, y)| Vec2 { x, y }).collect()]);
+    p.ceilings = Some(if with_ceiling { vec![c] } else { vec![] });
+    let uk = p.ceilings.as_ref().and_then(|cs| cs.first()).map_or(0.0, |c| p.ceiling_vertical_extent(c).0);
+    let (_, crown) = p.wall_vertical_extent(&p.walls[0]);
+    let mut out = emit_walls(&p, false).unwrap();
+    out.extend(emit_walls(&p, true).unwrap());
+    (p, out, uk, crown)
+}
+
+/// Höchste Oberkante aller Stücke an einer Stelle der Achse (x = 5, y).
+fn top_at_y(ws: &[RWall], y: f64) -> f64 {
+    ws.iter()
+        .filter(|w| (w.start[1].min(w.end[1]) - 1e-6..=w.start[1].max(w.end[1]) + 1e-6).contains(&y))
+        .map(|w| wall_top_at(w, [5.0, y]))
+        .fold(f64::NEG_INFINITY, f64::max)
+}
+
+/// [292] Unter einer waagrechten Decke endet die Wand an der Decken-UK; ohne Option bleibt die Krone; ohne Decke
+/// Rückfall auf die Geschosshöhe.
+#[test]
+fn wand_ok_bis_decke_waagrecht_und_rueckfall() {
+    let (_, ws, uk, crown) = wall_under_ceiling(true, true, None, None);
+    assert!(uk < crown - 0.05, "UK {uk} unter Krone {crown}");
+    for y in [0.5, 2.0, 3.5] {
+        assert!((top_at_y(&ws, y) - uk).abs() < 1e-6, "y {y}: {} soll {uk}", top_at_y(&ws, y));
+    }
+    let (_, ws, _, crown) = wall_under_ceiling(false, true, None, None);
+    assert!((top_at_y(&ws, 2.0) - crown).abs() < 1e-6, "ohne Option: Krone");
+    let (_, ws, _, crown) = wall_under_ceiling(true, false, None, None);
+    assert!((top_at_y(&ws, 2.0) - crown).abs() < 1e-6, "ohne Decke: Geschosshöhe");
+}
+
+/// [292] Unter einer geneigten Decke folgt die Oberkante der Neigung (Gefälle −0.5 m auf 4 m).
+#[test]
+fn wand_ok_bis_decke_geneigt_folgt_der_neigung() {
+    let (_, ws, uk, _) = wall_under_ceiling(true, true, Some(-0.5), None);
+    for y in [0.5, 2.0, 3.5] {
+        let soll = uk - 0.5 * y / 4.0;
+        assert!((top_at_y(&ws, y) - soll).abs() < 1e-3, "y {y}: {} soll {soll}", top_at_y(&ws, y));
+    }
+    assert!(ws.iter().any(|w| w.top_plane.is_some()), "schräge Oberkante");
+}
+
+/// [292] Deckenloch (y 1…3): dort bleibt die Krone, daneben endet die Wand an der UK.
+#[test]
+fn wand_ok_bis_decke_mit_deckenloch() {
+    let (_, ws, uk, crown) = wall_under_ceiling(true, true, None, Some([4.0, 1.0, 6.0, 3.0]));
+    assert!((top_at_y(&ws, 0.5) - uk).abs() < 1e-6 && (top_at_y(&ws, 3.5) - uk).abs() < 1e-6);
+    assert!((top_at_y(&ws, 2.0) - crown).abs() < 1e-6, "im Loch: Krone, {}", top_at_y(&ws, 2.0));
+}

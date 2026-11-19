@@ -5045,6 +5045,12 @@ export type Wall = {
    */
   roofAttach?: boolean;
   /**
+   * OK bis Decke ([292]): `true` = die Wand endet an der Unterkante der Decke ihres Geschosses (waagrecht: Decken-UK;
+   * geneigt: schräge Oberkante; im Deckenloch/ausserhalb der Decke bleibt die Krone); `undefined`/`false` = Wandkrone
+   * (Geschosshöhe bzw. `top`).
+   */
+  ceilingAttach?: boolean;
+  /**
    * Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
    * Ausrichtung am Element (Default 0).
    */

@@ -3499,6 +3499,12 @@ pub struct Wall {
     #[serde(rename = "roofAttach", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub roof_attach: Option<bool>,
+    /// OK bis Decke ([292]): `true` = die Wand endet an der Unterkante der Decke ihres Geschosses (waagrecht: Decken-UK;
+    /// geneigt: schräge Oberkante; im Deckenloch/ausserhalb der Decke bleibt die Krone); `undefined`/`false` = Wandkrone
+    /// (Geschosshöhe bzw. `top`).
+    #[serde(rename = "ceilingAttach", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub ceiling_attach: Option<bool>,
     /// Ansichtsschraffur ([100]): Drehung (Grad) des Oberflächenmusters dieses Elements gegenüber der
     /// Ausrichtung am Element (Default 0).
     #[serde(rename = "surfacePatternAngle", default, skip_serializing_if = "Option::is_none")]

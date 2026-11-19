@@ -616,9 +616,11 @@ pub(crate) fn floor_context(p: &Project, floor_id: &str, with_ceilings: bool) ->
 
 /// Wie [`floor_context`]; `joins`: schon gerechnete Schnittlinien je Wand-id (für den Deckenrand [178]).
 pub(crate) fn floor_context_with(p: &Project, floor_id: &str, with_ceilings: bool, joins: Option<&HashMap<String, WallCuts>>) -> FloorContext {
-    let only = |c: &Ceiling| with_ceilings && c.floor_id == floor_id && c.outline.len() >= 3;
+    // [292] Wände mit `ceilingAttach` brauchen die Platten-Umrisse auch ohne Decken im Kontext (Schnitt).
+    let needs = with_ceilings || p.walls.iter().any(|w| w.floor_id == floor_id && w.ceiling_attach == Some(true));
+    let only = |c: &Ceiling| needs && c.floor_id == floor_id && c.outline.len() >= 3;
     // [178] Platte bis Aussenkante Kern: die Aussenschicht-Bänder der Aussenwand liegen ausserhalb und laufen durch.
-    let bearing = if with_ceilings { super::bearing::bearing_outlines(p, only, joins) } else { Vec::new() };
+    let bearing = if needs { super::bearing::bearing_outlines(p, only, joins) } else { Vec::new() };
     floor_context_from(p, floor_id, with_ceilings, &bearing)
 }
 
@@ -664,7 +666,40 @@ pub(crate) fn floor_context_from(p: &Project, floor_id: &str, with_ceilings: boo
             ri
         })
         .collect();
-    FloorContext::new(ceilings, roofs)
+    FloorContext::new(ceilings, roofs).with_ceiling_undersides(ceiling_undersides(p, floor_id, bearing))
+}
+
+/// [292] Unterkanten der Decken des Geschosses für Wände mit `ceilingAttach` (waagrecht und geneigt, auch ohne
+/// `with_ceilings`: der Schnitt rechnet die Decken selbst). Nur gebaut, wenn eine Wand des Geschosses sie braucht.
+/// Umriss = Platte bis Aussenkante der tragenden Schicht ([178], wie die Schnitt-Decken), Löcher = Aussparungen.
+fn ceiling_undersides(p: &Project, floor_id: &str, bearing: &[Option<Vec<crate::flat::Polygon>>]) -> Vec<crate::wall_bands::RoofFacet> {
+    if !p.walls.iter().any(|w| w.floor_id == floor_id && w.ceiling_attach == Some(true)) {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (ci, c) in p.ceilings.as_deref().unwrap_or(&[]).iter().enumerate() {
+        if c.floor_id != floor_id || c.outline.len() < 3 {
+            continue;
+        }
+        let (zb, _) = p.ceiling_vertical_extent(c);
+        // z = zb + gx (x − ox) + gy (y − oy)
+        let plane = match c.slope_plane() {
+            Some(g) => [zb - g[2] * g[0] - g[3] * g[1], g[2], g[3]],
+            None => [zb, 0.0, 0.0],
+        };
+        let rings: Vec<Vec<[f64; 2]>> = match bearing.get(ci).cloned().flatten() {
+            Some(polys) => polys.iter().map(|poly| poly[0].iter().map(|q| [q[0], q[1]]).collect()).collect(),
+            None => vec![c.ring().iter().map(|v| [v.x, v.y]).collect()],
+        };
+        let holes: Vec<Vec<[f64; 2]>> = c.openings.iter().flatten().filter(|h| h.len() >= 3).map(|h| h.iter().map(|v| [v.x, v.y]).collect()).collect();
+        for ring in rings {
+            if let Some(mut f) = crate::wall_bands::RoofFacet::new(ring, plane) {
+                f.holes = holes.clone();
+                out.push(f);
+            }
+        }
+    }
+    out
 }
 
 /// Liegt der Achspunkt `p` eines Bogen-Teilkörpers an einer inneren Stossfuge (nicht an Anfang, Ende
@@ -748,6 +783,7 @@ fn wall_pieces_with(p: &Project, maps: &[String], wall: &Wall, ctx: &FloorContex
             openings: wall_openings(p, wall, openings, true),
             cuts,
             roof_attach: wall.roof_attach,
+            ceiling_attach: wall.ceiling_attach == Some(true),
             reveals: if layered && stacked { wall_reveals(p, wall, openings, bands.len()) } else { Vec::new() },
             keep_holes: plain,
             // [216] Sehnen-Zonen (über deckungsgleiche Bogenwände der Geschosse vereinigt, `arc_zones`): Wand und Loch liegen

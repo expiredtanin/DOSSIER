@@ -93,6 +93,9 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
         // "auto" ist der Default ⇒ als undefined speichern.
         patchAll("walls", selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
     },
+    onSetWallCeilingAttach: (attach) => {
+      if (selection?.kind === "wall") patchAll("walls", selection.id, { ceilingAttach: attach ? true : undefined });
+    },
     onSetBuildingFlags: (flags) => {
       const patch: { isExternal?: boolean; loadBearing?: boolean } = {};
       if (flags.isExternal !== undefined) patch.isExternal = flags.isExternal || undefined;

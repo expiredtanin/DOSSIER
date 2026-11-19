@@ -507,6 +507,8 @@ fn wall_selection(root: &Map<String, Value>, w: &Value) -> Result<J, String> {
         .v("sliceTermination", nn(field(w, "sliceTermination")).cloned().unwrap_or_else(|| "both".into()))
         // An Dach anschliessen ([G2]): fehlt = automatisch.
         .v("roofAttach", Value::String(match field(w, "roofAttach").and_then(|v| v.as_bool()) { Some(true) => "on", Some(false) => "off", None => "auto" }.into()))
+        // OK bis Decke ([292]): fehlt = aus.
+        .v("ceilingAttach", Value::Bool(field(w, "ceilingAttach").and_then(Value::as_bool).unwrap_or(false)))
         .raw("wallTypeId", w, "wallTypeId")
         // Aussenbauteil / tragend ([97]/[98]: Listen, IFC-Pset).
         .v("isExternal", Value::Bool(field(w, "isExternal").and_then(Value::as_bool).unwrap_or(false)))

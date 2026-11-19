@@ -91,6 +91,8 @@ impl RoofIn {
 pub struct RoofFacet {
     pub ring: Vec<[f64; 2]>,
     pub plane: [f64; 3],
+    /// Aussparungen (Deckenlöcher, [292]); leer bei Dachflächen.
+    pub holes: Vec<Vec<[f64; 2]>>,
     bounds: [f64; 4],
 }
 
@@ -101,7 +103,7 @@ impl RoofFacet {
             return None;
         }
         let b = outline_bounds(ring.iter().map(|q| (q[0], q[1])));
-        Some(RoofFacet { ring, plane, bounds: [b.min_x, b.min_y, b.max_x, b.max_y] })
+        Some(RoofFacet { ring, plane, holes: Vec::new(), bounds: [b.min_x, b.min_y, b.max_x, b.max_y] })
     }
     pub(crate) fn z(&self, x: f64, y: f64) -> f64 {
         self.plane[0] + self.plane[1] * x + self.plane[2] * y
@@ -111,22 +113,30 @@ impl RoofFacet {
         if x < b[0] || x > b[2] || y < b[1] || y > b[3] {
             return false;
         }
-        let mut inside = false;
-        let n = self.ring.len();
-        let mut j = n - 1;
-        for i in 0..n {
-            let (a, c) = (self.ring[i], self.ring[j]);
-            if (a[1] > y) != (c[1] > y) && x < (c[0] - a[0]) * (y - a[1]) / (c[1] - a[1]) + a[0] {
-                inside = !inside;
-            }
-            j = i;
-        }
-        inside
+        ring_has(&self.ring, x, y) && !self.holes.iter().any(|h| ring_has(h, x, y))
     }
     /// Höchster Wert über den Ecken.
     fn z_max(&self) -> f64 {
         self.ring.iter().map(|q| self.z(q[0], q[1])).fold(f64::NEG_INFINITY, f64::max)
     }
+}
+
+/// Punkt im Ring (gerade-ungerade-Regel).
+fn ring_has(ring: &[[f64; 2]], x: f64, y: f64) -> bool {
+    let mut inside = false;
+    let n = ring.len();
+    if n < 3 {
+        return false;
+    }
+    let mut j = n - 1;
+    for i in 0..n {
+        let (a, c) = (ring[i], ring[j]);
+        if (a[1] > y) != (c[1] > y) && x < (c[0] - a[0]) * (y - a[1]) / (c[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+        j = i;
+    }
+    inside
 }
 
 /// Unterkanten-Facetten der Dachflächen: Oberfläche um `total` senkrecht zur Fläche gesenkt (wie die
@@ -190,6 +200,9 @@ pub struct WallIn {
     /// Dach-Unterkante, wo ihre Krone darüber liegt), `Some(true)` = zusätzlich bis unter das Dach
     /// verlängert, `Some(false)` = Dächer schneiden die Wand nicht.
     pub roof_attach: Option<bool>,
+    /// OK bis Decke ([292], `Wall.ceilingAttach`): die Wand endet an der Unterkante der Decken ihres Geschosses
+    /// (`FloorContext::under`), auch geneigt.
+    pub ceiling_attach: bool,
     /// [231] Unter einer Dachfläche die Löcher im Stück behalten, statt es in Pfeiler/Brüstung/Sturz mit je
     /// eigener Oberkante zu teilen — für den Wandkörper per Boolean (`model3d/wall_body.rs`), der die Löcher
     /// selbst ausschneidet. Sonst `false`.
@@ -207,9 +220,23 @@ pub struct WallIn {
 pub struct FloorContext {
     ceilings: Vec<(CeilingIn, Bounds)>,
     roofs: Vec<(RoofIn, Bounds)>,
+    /// Unterkanten der Decken ([292]) — nur für Wände mit `ceiling_attach`; gilt die tiefste.
+    under: Vec<(RoofFacet, Bounds)>,
 }
 
 impl FloorContext {
+    /// Decken-Unterkanten ([292]) ergänzen (`RoofFacet::plane` = UK, `holes` = Aussparungen).
+    pub fn with_ceiling_undersides(mut self, facets: Vec<RoofFacet>) -> Self {
+        self.under = facets
+            .into_iter()
+            .map(|f| {
+                let b = Bounds { min_x: f.bounds[0], min_y: f.bounds[1], max_x: f.bounds[2], max_y: f.bounds[3] };
+                (f, b)
+            })
+            .collect();
+        self
+    }
+
     /// Die Decken (Eingabe) — der 3D-Cache ([58]) vergleicht sie: der Deckenrand [178] hängt von den Wänden ab.
     pub fn ceiling_inputs(&self) -> Vec<CeilingIn> {
         self.ceilings.iter().map(|c| c.0.clone()).collect()
@@ -219,6 +246,8 @@ impl FloorContext {
     pub fn same_input(&self, o: &FloorContext) -> bool {
         self.ceilings.len() == o.ceilings.len()
             && self.roofs.len() == o.roofs.len()
+            && self.under.len() == o.under.len()
+            && self.under.iter().zip(&o.under).all(|(a, b)| a.0 == b.0)
             && self.ceilings.iter().zip(&o.ceilings).all(|(a, b)| a.0 == b.0)
             && self.roofs.iter().zip(&o.roofs).all(|(a, b)| a.0 == b.0)
     }
@@ -239,6 +268,7 @@ impl FloorContext {
                     (r, b)
                 })
                 .collect(),
+            under: Vec::new(),
         }
     }
 }
@@ -621,7 +651,11 @@ enum Fac {
 }
 
 struct Tops<'a> {
+    /// Dachfacetten (je Punkt gilt die höchste), danach ab `n_roof` die Decken-UK (tiefste, [292]).
     facets: Vec<&'a RoofFacet>,
+    n_roof: usize,
+    /// Fuss der ganzen Wand (nicht des Stücks): Decken darunter zählen nicht.
+    foot: f64,
     zb: f64,
     zt_free: f64,
     zt_cap: f64,
@@ -630,12 +664,27 @@ struct Tops<'a> {
 impl Tops<'_> {
     fn at(&self, p: Vec2) -> Fac {
         let mut best: Option<(f64, usize)> = None;
-        for (k, f) in self.facets.iter().enumerate() {
+        for (k, f) in self.facets.iter().enumerate().take(self.n_roof) {
             if f.contains(p.x, p.y) {
                 let z = f.z(p.x, p.y);
                 if best.is_none_or(|b| z > b.0) {
                     best = Some((z, k));
                 }
+            }
+        }
+        // Decke darüber: tiefste Unterkante über dem Wandfuss (Stücke darüber entfallen); eine Decke unter dem Fuss zählt nicht.
+        let mut under: Option<(f64, usize)> = None;
+        for (k, f) in self.facets.iter().enumerate().skip(self.n_roof) {
+            if f.contains(p.x, p.y) {
+                let z = f.z(p.x, p.y);
+                if z > self.foot + 1e-9 && under.is_none_or(|b| z < b.0) {
+                    under = Some((z, k));
+                }
+            }
+        }
+        if let Some(u) = under {
+            if best.is_none_or(|b| u.0 < b.0) {
+                best = Some(u);
             }
         }
         match best {
@@ -678,23 +727,32 @@ struct TopPiece {
 
 /// Dächer, die eine Wand im Höhenbereich `[zb, zt]` betreffen; `None` = keine (unverändert).
 fn roof_tops_ctx<'a>(w: &WallIn, ctx: &'a FloorContext, zb: f64, zt: f64) -> Option<Tops<'a>> {
-    if w.roof_attach == Some(false) || ctx.roofs.is_empty() {
+    let roofs_on = w.roof_attach != Some(false) && !ctx.roofs.is_empty();
+    let under_on = w.ceiling_attach && !ctx.under.is_empty();
+    if !roofs_on && !under_on {
         return None;
     }
     let wb = wall_bounds(w, w.thickness_safe.max(0.0) + 0.01);
-    let facets: Vec<&RoofFacet> = ctx
-        .roofs
-        .iter()
-        .filter(|(r, rb)| r.eaves_z + 50.0 >= zb && bounds_overlap(wb, *rb))
-        .flat_map(|(r, _)| r.facets.iter())
-        .filter(|f| bounds_overlap(wb, Bounds { min_x: f.bounds[0], min_y: f.bounds[1], max_x: f.bounds[2], max_y: f.bounds[3] }))
-        .collect();
+    let mut facets: Vec<&RoofFacet> = if roofs_on {
+        ctx.roofs
+            .iter()
+            .filter(|(r, rb)| r.eaves_z + 50.0 >= zb && bounds_overlap(wb, *rb))
+            .flat_map(|(r, _)| r.facets.iter())
+            .filter(|f| bounds_overlap(wb, Bounds { min_x: f.bounds[0], min_y: f.bounds[1], max_x: f.bounds[2], max_y: f.bounds[3] }))
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let n_roof = facets.len();
+    if under_on {
+        facets.extend(ctx.under.iter().filter(|(_, b)| bounds_overlap(wb, *b)).map(|(f, _)| f));
+    }
     if facets.is_empty() {
         return None;
     }
     // Verlängern nur, wo der Höhenbereich bis zur Wandkrone reicht (nicht unter einer Decke).
-    let zt_cap = if w.roof_attach == Some(true) && (zt - w.z_top).abs() < EPS { facets.iter().map(|f| f.z_max()).fold(zt, f64::max) } else { zt };
-    Some(Tops { facets, zb, zt_free: zt, zt_cap })
+    let zt_cap = if w.roof_attach == Some(true) && (zt - w.z_top).abs() < EPS { facets[..n_roof].iter().map(|f| f.z_max()).fold(zt, f64::max) } else { zt };
+    Some(Tops { facets, n_roof, foot: w.z_bottom, zb, zt_free: zt, zt_cap })
 }
 
 /// Ecken der Grundfläche eines Bandstücks (aussen +n, innen −n) an den Schnittlinien.
@@ -808,6 +866,7 @@ fn strip_tops(w: &WallIn, t: &Tops, u: Vec2, n: Vec2, off: f64, th: f64, a: f64,
             Fac::Floor => continue,
             Fac::Free => (None, t.zt_free),
             Fac::Cap => (None, t.zt_cap),
+            Fac::Roof(k) if k >= t.n_roof && t.coef(f)[1] == 0.0 && t.coef(f)[2] == 0.0 => (None, t.coef(f)[0].clamp_safe(t.zb, t.zt_cap)),
             Fac::Roof(_) => {
                 let c = t.coef(f);
                 let zmax = strip_corners(w, u, n, off, th, s0, s1, c0, c1).iter().map(|q| c[0] + c[1] * q.x + c[2] * q.y).fold(f64::NEG_INFINITY, f64::max);
@@ -1249,6 +1308,7 @@ mod tests {
             cuts: WallCuts::default(),
             reveals: vec![],
             roof_attach: None,
+            ceiling_attach: false,
             keep_holes: false,
             chord_zones: vec![],
         }

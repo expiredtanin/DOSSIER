@@ -133,6 +133,8 @@ export interface WallInfo {
   sliceTermination: SliceTermination;
   /** An Dach anschliessen ([G2]): "auto" (Default), "on" (bis unter das Dach verlängern), "off". */
   roofAttach: "auto" | "on" | "off";
+  /** OK bis Decke ([292]): Wand endet an der Decken-Unterkante ihres Geschosses (auch geneigt). */
+  ceilingAttach: boolean;
   /** Aussenbauteil / tragend ([97]/[98]). */
   isExternal: boolean;
   loadBearing: boolean;

@@ -406,6 +406,10 @@ fn wall_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &
         if let Some(e) = external {
             f.push(("isExternal", Value::Bool(e)));
         }
+        // [292] OK bis Decke (Option des Befehls, Vorgabe aus).
+        if matches!(v.get("ceilingAttach"), Some(Value::Bool(true))) {
+            f.push(("ceilingAttach", Value::Bool(true)));
+        }
         walls.push(obj(f));
     }
     if walls.is_empty() {

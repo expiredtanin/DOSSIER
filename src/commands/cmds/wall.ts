@@ -81,8 +81,10 @@ interface ArcMode {
   typeName: string | null;
   /** [285] Aussenbauteil (IFC `IsExternal`): „auto“ = nach dem Wandtyp („Aussenwand“ ⇒ aussen), „yes“/„no“ ausdrücklich. */
   ext: "auto" | "yes" | "no";
+  /** [292] OK bis Decke: neue Wände enden an der Unterkante der Decke ihres Geschosses (Vorgabe aus). */
+  ceil: boolean;
 }
-const NO_MODE: ArcMode = { arc: false, tangent: false, typeId: null, typeName: null, ext: "auto" };
+const NO_MODE: ArcMode = { arc: false, tangent: false, typeId: null, typeName: null, ext: "auto", ceil: false };
 const EXT_NEXT = { auto: "yes", yes: "no", no: "auto" } as const;
 
 /** Kontext mit dem gewählten Wandtyp des Befehls (Option „Wandtyp“); ein inzwischen gelöschter Typ fällt auf den aktiven zurück. */
@@ -118,6 +120,7 @@ const arcOption = (on: boolean): CmdOption => ({ id: "arc", labelKey: "cmd.polyl
 const tangentOption = (on: boolean): CmdOption => ({ id: "tangent", labelKey: "cmd.polyline.tangentOpt", value: on ? "on" : "off" });
 const typeOption = (s: ArcMode): CmdOption => ({ id: "wtype", labelKey: "cmd.wall.typeOpt", value: s.typeName ?? t("cmd.wall.typeActive"), key: "W" });
 const extOption = (s: ArcMode): CmdOption => ({ id: "ext", labelKey: "cmd.wall.extOpt", value: t(`cmd.wall.ext.${s.ext}`), key: t("cmd.wall.extKey") });
+const ceilOption = (s: ArcMode): CmdOption => ({ id: "ceil", labelKey: "cmd.wall.ceilOpt", value: t(s.ceil ? "cmd.wall.ext.yes" : "cmd.wall.ext.no"), key: t("cmd.wall.ceilKey") });
 
 /**
  * Bänder der schon gesetzten Segmente: sie ändern sich je Mausschritt nicht und werden nur neu gerechnet,
@@ -167,13 +170,13 @@ function wallDraft(
  * Commit: je Achssegment eine Wand des aktiven Typs (Höhe aus dem Geschoss); eine gelockte Dicke
  * (einschichtig) wählt/erzeugt den passenden Wandtyp — beides im Kern (`cmd_create.rs`).
  */
-const appendWalls = (pts: Vec2[], ctx: CommandContext, thick: number | null, segs: Seg[] = [], ext: ArcMode["ext"] = "auto") => {
+const appendWalls = (pts: Vec2[], ctx: CommandContext, thick: number | null, segs: Seg[] = [], ext: ArcMode["ext"] = "auto", ceil = false) => {
   const external = ext === "auto" ? null : ext === "yes";
   return createMutation(
     ctx,
     segs.some((g) => g !== 0)
-      ? { cmd: "wall", pts: pts.map(xy), thick, segs, external }
-      : { cmd: "wall", pts: pts.map(xy), thick, external },
+      ? { cmd: "wall", pts: pts.map(xy), thick, segs, external, ceilingAttach: ceil }
+      : { cmd: "wall", pts: pts.map(xy), thick, external, ceilingAttach: ceil },
   );
 };
 
@@ -186,7 +189,7 @@ const idle = (
   { draft: null, done: true },
 ];
 
-const modeOf = (s: ArcMode): ArcMode => ({ arc: s.arc, tangent: s.tangent, typeId: s.typeId, typeName: s.typeName, ext: s.ext });
+const modeOf = (s: ArcMode): ArcMode => ({ arc: s.arc, tangent: s.tangent, typeId: s.typeId, typeName: s.typeName, ext: s.ext, ceil: s.ceil });
 const draftOf = (ctx: CommandContext, s: WallDrawing): ToolDraft => wallDraft(ctx, s.points, s.cursor, s.thickOverride, s);
 
 export const wallCommand: Command = {
@@ -202,7 +205,7 @@ export const wallCommand: Command = {
   accepts: () => ["point", "number", "option"],
   options: (s) => {
     const ps = s as WallCmdState;
-    const arc = [arcOption(!!ps.arc), ...(ps.arc ? [tangentOption(!!ps.tangent)] : []), typeOption(ps), extOption(ps)];
+    const arc = [arcOption(!!ps.arc), ...(ps.arc ? [tangentOption(!!ps.tangent)] : []), typeOption(ps), extOption(ps), ceilOption(ps)];
     return ps.phase === "next" ? [...arc, UNDO] : arc;
   },
   init: (): WallIdle => ({ phase: "start", lastPoint: null, thickOverride: null, single: false, ...NO_MODE }),
@@ -212,9 +215,10 @@ export const wallCommand: Command = {
     const to = s.thickOverride;
 
     // [285] Wandtyp wählen (reihum durch die Typen des Projekts) bzw. Aussenbauteil umschalten.
-    if (input.kind === "option" && (input.id === "wtype" || input.id === "ext")) {
+    if (input.kind === "option" && (input.id === "wtype" || input.id === "ext" || input.id === "ceil")) {
       let flip: Partial<ArcMode>;
       if (input.id === "ext") flip = { ext: EXT_NEXT[s.ext] };
+      else if (input.id === "ceil") flip = { ceil: !s.ceil };
       else {
         const list = ctx0.project.wallTypes;
         if (list.length === 0) return [s, { draft: null }];
@@ -297,7 +301,7 @@ export const wallCommand: Command = {
     if (s.points.length >= 3 && segLen(s.points[0], pt) < EPS) {
       return [
         { phase: "start", lastPoint: null, thickOverride: to, single, ...modeOf(s) } as WallIdle,
-        { draft: null, done: true, commit: appendWalls([...s.points, s.points[0]], ctx, to, [...s.segs, seg], s.ext) },
+        { draft: null, done: true, commit: appendWalls([...s.points, s.points[0]], ctx, to, [...s.segs, seg], s.ext, s.ceil) },
       ];
     }
     const ns: WallDrawing = {
@@ -330,7 +334,7 @@ export const wallCommand: Command = {
       const to = s.thickOverride;
       return [
         { phase: "start", lastPoint: null, thickOverride: to, single: s.single, ...modeOf(s) } as WallIdle,
-        { draft: null, done: true, commit: appendWalls(pts, ctx, to, s.segs, s.ext) },
+        { draft: null, done: true, commit: appendWalls(pts, ctx, to, s.segs, s.ext, s.ceil) },
       ];
     }
     return idle(s.thickOverride, s.single, modeOf(s));
