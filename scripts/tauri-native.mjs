@@ -40,6 +40,9 @@ if (args[0] === "build" && process.platform === "darwin" && !process.env.DOSSIER
 }
 if (args[0] === "build" && existsSync(sidecar) && !args.some((a) => a.includes("tauri.cycles.conf.json")))
   args.push("--config", fileURLToPath(new URL("../src-tauri/tauri.cycles.conf.json", import.meta.url)));
+// CI ohne Apple-Zertifikat: GitHub setzt die Secrets dann als LEERE Variablen; Tauri versucht trotzdem den Import
+// („failed to import keychain certificate“). Leere APPLE_*-Variablen entfernen ⇒ unsignierter Bau.
+for (const k of Object.keys(process.env)) if (k.startsWith("APPLE_") && !process.env[k]) delete process.env[k];
 console.log(`[tauri-native] Build ${build}`);
 console.log(`[tauri-native] tauri ${args.join(" ")}`);
 const child = spawn("npx", ["tauri", ...args], { stdio: "inherit" });
