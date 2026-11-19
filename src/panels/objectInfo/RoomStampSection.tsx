@@ -96,7 +96,7 @@ export function RoomStampSection({ roomId }: { roomId: string }) {
     const c = common((s) => (s[key] as string | undefined) ?? "");
     const locked = perRoom && multi;
     return (
-      <div className="objinfo-field">
+      <div className="objinfo-field roomstamp-wrapfield">
         <span className="objinfo-flabel" title={t(label)}>{t(label)}</span>
         <input
           type="text"
@@ -115,7 +115,7 @@ export function RoomStampSection({ roomId }: { roomId: string }) {
   const tri = (label: TranslationKey, key: "showFloorArea" | "showUsage", testId: string, align: AlignKey, off: boolean) => {
     const c = common((s) => s[key]);
     return (
-      <div className="objinfo-field">
+      <div className="objinfo-field roomstamp-wrapfield">
         <span className="objinfo-flabel" title={t(label)}>{t(label)}</span>
         <TriState testId={testId} value={c.value} mixed={c.mixed} onChange={(v) => setField(key, v)} />
         {alignOf(align, label, off)}
