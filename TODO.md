@@ -392,4 +392,4 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
 - [237] Sichtprüfung der Oberflächen im Browser (13.11.)
 - [238] Sichtprüfung, grössere Befunde aus [237] (13.11.)
 - [297] Deckenloch für Wendel-/Teilhöhen-Treppen und Innenhöfe im GV (19.11., Bild `doc/review-297/wendel.png`)
-- [298] Wendel: Lauflinie als Bogen statt Sehnenzug, Pfeil tangential (19.11., `plan/stair_symbol.rs` `arc_run_line`; Goldens und Mac nicht geprüft)
+- [298] Wendel: Lauflinie als Bogen statt Sehnenzug, Pfeil tangential (19.11., `plan/stair_symbol.rs` `arc_run_line`, Bild `doc/review-298/`; Goldens komplex UG/EG nachgeführt; Mac nicht geprüft)

@@ -3,6 +3,12 @@
 Prüfbilder je Aufgabe, neueste zuerst. Entstanden im Linux-Container (CLI-SVG bzw. Browser-Build in Chromium), **nicht** in der Mac-App. Details je ID in `TODO.md`.
 
 
+## [298] Wendel: Lauflinie rund
+
+**wendel-lauflinie.png** (Grundriss 1:50)
+
+![wendel-lauflinie.png](review-298/wendel-lauflinie.png)
+
 ## [291] Geländer wie Archicad: Pfosten, Füllung je Feld, an Treppe/Deckenkante gebunden
 
 **gelaender.png** (Axo: Stabgeländer an der rechten Treppenwange, Glasgeländer mit Pfosten an drei Deckenkanten, Feld 2 als Brüstung)
