@@ -5479,16 +5479,12 @@ body {
   padding-bottom: 20px;
 }
 /* [238] Auslaufender Rand unten: zeigt, dass unter der letzten sichtbaren Zeile noch Felder folgen (Gelände: Material,
-   Höhenversatz …), statt dass die Zeile wie abgeschnitten wirkt. Klebt am unteren Rand, liegt am Ende im Polster (kein Inhalt verdeckt). */
-.objinfo-panel::after {
-  content: "";
-  flex: 0 0 auto;
-  position: sticky;
-  bottom: 0;
-  height: 18px;
-  margin: 0 -8px -18px;
-  background: linear-gradient(transparent, var(--panel));
-  pointer-events: none;
+   Höhenversatz …), statt dass die Zeile wie abgeschnitten wirkt. Als Maske am Rand des Scroll-Bereichs, nicht als
+   `position: sticky`-Pseudo-Element: WebKit (Tauri/macOS) zieht beim Kleben das Polster ab, der Streifen sass dort 20 px zu
+   hoch quer über einer Zeile. Am Ende liegt der Auslauf im Polster (kein Inhalt verdeckt). */
+.objinfo-panel {
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 18px), transparent);
 }
 /* Gelände/Baugrube/Schatten in der Objekt-Info: der Abschnitt wächst mit seinem Inhalt (sonst schrumpft er in der
    Flex-Spalte auf eine Zeile Höhe und verdeckt die Felder, `.site-panel` ist sonst ein eigener Scroll-Bereich). */
