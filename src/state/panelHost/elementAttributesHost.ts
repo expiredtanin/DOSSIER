@@ -6,6 +6,7 @@
 import { patchItems, removeRoofHole, setRoofEdge } from "../../core";
 import type { EntityOf } from "../../core";
 import { getState } from "../appStore";
+import { wallTopPatch } from "../../model/wallTop";
 import type { FlatHostOpts, HostPart } from "./types";
 
 /** Auswahl-Arten mit Mehrfach-Setzen (Schlüssel in `Selection`). */
@@ -88,13 +89,9 @@ export function buildElementAttributesHost(c: FlatHostOpts) {
         // "both" ist der Default ⇒ als undefined speichern (Alt-Projekt-Parität).
         patchAll("walls", selection.id, { sliceTermination: termination === "both" ? undefined : termination });
     },
-    onSetWallRoofAttach: (attach) => {
-      if (selection?.kind === "wall")
-        // "auto" ist der Default ⇒ als undefined speichern.
-        patchAll("walls", selection.id, { roofAttach: attach === "auto" ? undefined : attach === "on" });
-    },
-    onSetWallCeilingAttach: (attach) => {
-      if (selection?.kind === "wall") patchAll("walls", selection.id, { ceilingAttach: attach ? true : undefined });
+    onSetWallTopMode: (mode) => {
+      // [293] roofAttach + ceilingAttach in EINER Op (undefined = Vorgabe).
+      if (selection?.kind === "wall") patchAll("walls", selection.id, { ...wallTopPatch(mode) });
     },
     onSetBuildingFlags: (flags) => {
       const patch: { isExternal?: boolean; loadBearing?: boolean } = {};

@@ -46,6 +46,7 @@ import type { TerrainOptions } from "../model/terrain";
 import type { TextStylePreset } from "../text/richText";
 import type { ScheduleKind } from "../export/exportSchedule";
 import type { DetailLevel } from "../model/viewTypes";
+import type { WallTopMode } from "../model/wallTop";
 import type { TabId as ResourceTabId } from "../ui/ResourceManager";
 
 // ── Darstellungsmodus-Steuerung je Dock-Inhalt ────────────────────────────
@@ -421,8 +422,8 @@ export interface PanelHostValue {
    */
   onSetWallSliceTermination: (termination: SliceTermination) => void;
   /** An Dach anschliessen ([G2]): "auto" = Default (Wand endet an der Dach-Unterkante). */
-  onSetWallRoofAttach: (attach: "auto" | "on" | "off") => void;
-  onSetWallCeilingAttach: (attach: boolean) => void;
+  /** [293] Oberkante der Wand: setzt `roofAttach` und `ceilingAttach` zusammen (ein Undo-Schritt). */
+  onSetWallTopMode: (mode: WallTopMode) => void;
   /** Aussenbauteil/tragend der gewählten Wand bzw. Decke ([97]/[98]); `false` = Feld weg. */
   onSetBuildingFlags: (flags: { isExternal?: boolean; loadBearing?: boolean }) => void;
   /** [178] Deckenrand der gewählten Decke: `true` = bis an den Umriss, `false` = Auflager bis Kern (Standard). */

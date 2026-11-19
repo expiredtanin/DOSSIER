@@ -8,6 +8,7 @@ import { usePanelHost } from "../host";
 import { t } from "../../i18n";
 import { Dropdown } from "../../ui/Dropdown";
 import type { WallReferenceLine, SliceTermination } from "../../model/types";
+import { wallTopFromFields, type WallTopMode } from "../../model/wallTop";
 import { UValueRow } from "../UValueRow";
 import { formatM } from "../../model/types";
 import { BuildingFlags, DimensionField, MixedMark, VerticalAnchorRow } from "./fields";
@@ -99,34 +100,20 @@ export function WallSection({
         />
       </div>
 
-      {/* An Dach anschliessen ([G2]): automatisch endet die Wand an der Dach-Unterkante, "Ja"
-          verlängert sie bis unter das Dach, "Nein" lässt die Dächer die Wand nicht schneiden. */}
+      {/* Oberkante ([293], [G2], [292]): EINE Auswahl über roofAttach + ceilingAttach (eine Op). */}
       <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.wall.roofAttach")}</span>
+        <span className="objinfo-flabel">{t("objinfo.wall.topMode")}</span>
         <Dropdown
-          value={wall.roofAttach}
-          onChange={(v) => host.onSetWallRoofAttach(v as "auto" | "on" | "off")}
+          value={wallTopFromFields(wall.roofAttach === "auto" ? undefined : wall.roofAttach === "on", wall.ceilingAttach)}
+          onChange={(v) => host.onSetWallTopMode(v as WallTopMode)}
           options={[
-            { value: "auto", label: t("objinfo.wall.roofAttach.auto") },
-            { value: "on", label: t("objinfo.wall.roofAttach.on") },
-            { value: "off", label: t("objinfo.wall.roofAttach.off") },
+            { value: "storey", label: t("objinfo.wall.topMode.storey") },
+            { value: "ceiling", label: t("objinfo.wall.topMode.ceiling") },
+            { value: "roof", label: t("objinfo.wall.topMode.roof") },
+            { value: "lower", label: t("objinfo.wall.topMode.lower") },
           ]}
-          title={t("objinfo.wall.roofAttach.tip")}
-          width={120}
-        />
-      </div>
-      {/* OK bis Decke ([292]): Oberkante an der Unterkante der Decke des Geschosses, auch geneigt. */}
-      <div className="objinfo-field">
-        <span className="objinfo-flabel">{t("objinfo.wall.ceilingAttach")}</span>
-        <Dropdown
-          value={wall.ceilingAttach ? "on" : "off"}
-          onChange={(v) => host.onSetWallCeilingAttach(v === "on")}
-          options={[
-            { value: "off", label: t("objinfo.wall.ceilingAttach.off") },
-            { value: "on", label: t("objinfo.wall.ceilingAttach.on") },
-          ]}
-          title={t("objinfo.wall.ceilingAttach.tip")}
-          width={120}
+          title={t("objinfo.wall.topMode.tip")}
+          width={150}
         />
       </div>
       <BuildingFlags isExternal={wall.isExternal} loadBearing={wall.loadBearing} host={host} />

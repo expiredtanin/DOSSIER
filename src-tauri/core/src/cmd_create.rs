@@ -406,9 +406,12 @@ fn wall_ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &
         if let Some(e) = external {
             f.push(("isExternal", Value::Bool(e)));
         }
-        // [292] OK bis Decke (Option des Befehls, Vorgabe aus).
+        // [292]/[293] Oberkante (Option des Befehls, Vorgabe Geschosshöhe): `ceilingAttach`, `roofAttach` nur wenn gesetzt.
         if matches!(v.get("ceilingAttach"), Some(Value::Bool(true))) {
             f.push(("ceilingAttach", Value::Bool(true)));
+        }
+        if let Some(Value::Bool(r)) = v.get("roofAttach") {
+            f.push(("roofAttach", Value::Bool(*r)));
         }
         walls.push(obj(f));
     }
@@ -1649,6 +1652,27 @@ mod tests {
         assert_eq!(wall("WT3", json!({"external": true}))["isExternal"], true);
         assert_eq!(wall("WT1", json!({"external": false}))["isExternal"], false);
         assert!(wall("WT1", json!({"external": null}))["isExternal"] == true);
+    }
+
+    /// [293] Oberkante der neuen Wand: `ceilingAttach`/`roofAttach` der Anfrage kommen ins Element, fehlend bleibt fehlend.
+    #[test]
+    fn wand_oberkante_aus_anfrage() {
+        let r = root(json!({"wallTypes": [{"id": "WT1", "name": "W", "layers": [{"componentId": "c", "thickness": 0.3}]}]}));
+        let wall = |extra: Value| {
+            let mut q = json!({"cmd": "wall", "pts": [[0, 0], [4, 0]], "thick": null});
+            q.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
+            let mut q = req(q);
+            q["ctx"]["wallType"] = json!("WT1");
+            let o = ops(&r, &crate::model::lenient::typed_for_test(&r), &q).unwrap();
+            items(&o, 0)[0].clone()
+        };
+        let w = wall(json!({}));
+        assert!(w.get("ceilingAttach").is_none() && w.get("roofAttach").is_none());
+        let w = wall(json!({"ceilingAttach": true, "roofAttach": false}));
+        assert_eq!((w["ceilingAttach"].clone(), w["roofAttach"].clone()), (json!(true), json!(false)));
+        let w = wall(json!({"roofAttach": true}));
+        assert!(w.get("ceilingAttach").is_none());
+        assert_eq!(w["roofAttach"], true);
     }
 
     /// [285] Decke mit Lage: `top` = Oberkante in m über dem Boden des Geschosses (0 = Bodenplatte unter dem Geschoss);

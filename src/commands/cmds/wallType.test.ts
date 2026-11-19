@@ -79,4 +79,16 @@ describe("wallCommand Wandtyp und Aussenbauteil [285]", () => {
     const o = wallCommand.options(s).find((x) => x.id === "wtype");
     expect(o?.value).toBe("Innenwand 12");
   });
+
+  it("Option Oberkante [293]: reihum Geschosshöhe, Decke, Dach, tiefere von beiden", () => {
+    const w0 = draw([]);
+    expect(w0.ceilingAttach).toBeUndefined();
+    expect(w0.roofAttach).toBeUndefined();
+    const w1 = draw(["top"]);
+    expect([w1.ceilingAttach, w1.roofAttach]).toEqual([true, false]);
+    const w2 = draw(["top", "top"]);
+    expect([w2.ceilingAttach, w2.roofAttach]).toEqual([undefined, true]);
+    const w3 = draw(["top", "top", "top"]);
+    expect([w3.ceilingAttach, w3.roofAttach]).toEqual([true, undefined]);
+  });
 });

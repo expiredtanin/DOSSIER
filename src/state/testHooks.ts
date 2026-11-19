@@ -91,6 +91,8 @@ declare global {
       layerView: () => { wallId: string; visible: string[]; prims: number; wallPrims: number };
       /** [195] Strichstärke-Override der Wände (id → mm), nur gesetzte. */
       wallWeights: () => Record<string, number>;
+      /** [293] Oberkante der Wände: `roofAttach`/`ceilingAttach`, nur Wände mit gesetztem Feld. */
+      wallTops: () => Record<string, { roofAttach?: boolean; ceilingAttach?: boolean }>;
       /** [190] Auswahl-Aktion wie das native Menü (Bearbeiten > Verbinden usw.), ohne Tastendruck: `runSelectionAction`. */
       selectionAction: (id: SelectionActionId) => void;
       /** [190] Wände (id, Start, Ende) des Projekts. */
@@ -151,6 +153,7 @@ export function installTestHooks(): void {
         excavations: (p.context ?? []).flatMap((c) => (c.type === "excavation" ? [{ id: c.id, bottom: c.bottom }] : [])),
       };
     },
+    wallTops: () => Object.fromEntries(getState().project.walls.flatMap((w) => (w.roofAttach === undefined && w.ceilingAttach === undefined ? [] : [[w.id, { roofAttach: w.roofAttach, ceilingAttach: w.ceilingAttach }]]))),
     wallWeights: () => Object.fromEntries(getState().project.walls.flatMap((w) => (w.strokeWeight === undefined ? [] : [[w.id, w.strokeWeight]]))),
     selectionAction: (id) => runSelectionAction(id),
     walls: () => getState().project.walls.map((w) => ({ id: w.id, start: { ...w.start }, end: { ...w.end } })),
