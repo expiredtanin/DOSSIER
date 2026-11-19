@@ -402,6 +402,64 @@ mod tests {
         assert!(t.gv.is_finite());
     }
 
+    /// [297] O-Grundriss (Aussenwände 20 × 16, Hofwände 6 × 6 in der Mitte, Räume dazwischen) mit EINEM Dach über der
+    /// ganzen Aussenflucht, ohne Hof im Dach: der unüberbaute Innenhof (kein Raum, nach oben offen) bekommt keinen
+    /// Dachraum. Gleich viel wie ein Dach, dessen Hof ausdrücklich ausgespart ist; und kleiner als der Hof wäre gefüllt.
+    fn o_haus(roof_holes: bool, with_rooms: bool) -> Project {
+        let json = r#"{"drawingLevels":[{"id":"eg","name":"EG","kind":"floor","visible":true,"locked":false,"baseElevation":0,"floorHeight":2.6}],
+          "wallTypes":[{"id":"wt","name":"W","layers":[{"componentId":"c","thickness":0.3}]}],"walls":[],"rooms":[]}"#;
+        let mut p: Project = serde_json::from_str(json).unwrap();
+        let v = |x: f64, y: f64| serde_json::json!({"x": x, "y": y});
+        let mut walls = vec![];
+        for (k, (x0, y0, x1, y1)) in [(0.0, 0.0, 20.0, 16.0), (7.0, 5.0, 13.0, 11.0)].into_iter().enumerate() {
+            let pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)];
+            for i in 0..4 {
+                let (a, b) = (pts[i], pts[(i + 1) % 4]);
+                walls.push(serde_json::json!({"id":format!("w{k}{i}"),"type":"wall","floorId":"eg","categoryCode":"x","start":v(a.0,a.1),"end":v(b.0,b.1),"wallTypeId":"wt","height":2.6}));
+            }
+        }
+        let room = |id: &str, x0: f64, y0: f64, x1: f64, y1: f64| {
+            serde_json::json!({"id":id,"type":"room","floorId":"eg","categoryCode":"x","siaCategory":"HNF","name":id,"color":"#fff",
+            "boundary":[v(x0,y0),v(x1,y0),v(x1,y1),v(x0,y1)]})
+        };
+        let rooms = if with_rooms {
+            vec![room("l", 0.15, 0.15, 6.85, 15.85), room("r", 13.15, 0.15, 19.85, 15.85), room("u", 6.85, 0.15, 13.15, 4.85), room("o", 6.85, 11.15, 13.15, 15.85)]
+        } else {
+            vec![]
+        };
+        p.walls = serde_json::from_value(serde_json::Value::Array(walls)).unwrap();
+        p.rooms = Some(serde_json::from_value(serde_json::Value::Array(rooms)).unwrap());
+        let mut r = roof("sattel", 30.0, 0.5, serde_json::json!({"floorId":"eg"}));
+        r["outline"] = serde_json::json!([{"x":-0.15,"y":-0.15},{"x":20.15,"y":-0.15},{"x":20.15,"y":16.15},{"x":-0.15,"y":16.15}]);
+        if roof_holes {
+            r["holes"] = serde_json::json!([[{"x":7.15,"y":5.15},{"x":12.85,"y":5.15},{"x":12.85,"y":10.85},{"x":7.15,"y":10.85}]]);
+        }
+        p.roofs = Some(serde_json::from_value(serde_json::json!([r])).unwrap());
+        p
+    }
+
+    #[test]
+    fn innenhof_ohne_dach_wird_nicht_gefuellt() {
+        let t = area_table(&o_haus(false, true));
+        assert!(!t.notes.iter().any(|n| n == "gvRoofFailed"), "{:?}", t.notes);
+        // Von Hand: Satteldach 30° (Traufe y = −0.65 / 16.65 bei Überstand 0.5, First y = 8) über 20.3 × 16.3 (Aussenflucht)
+        // abzüglich Hof 5.7 × 5.7 (y 5.15 … 10.85); Höhe über OK Geschoss = (Abstand von der Traufe) · tan30.
+        let ganz = 20.3 * 2.0 * (8.65_f64 * 8.65 - 0.5 * 0.5) / 2.0;
+        let hof = 5.7 * 2.0 * (8.65_f64 * 8.65 - 5.8 * 5.8) / 2.0;
+        let dach = (ganz - hof) * T30;
+        assert!(close(t.levels[0].roof_gv, dach, 1e-2), "Dachraum {} statt {dach} (Hof gefüllt wären {})", t.levels[0].roof_gv, ganz * T30);
+        // Geschoss selbst: nur die Fläche GF × Höhe, der Hof kommt nicht dazu.
+        assert!(close(t.levels[0].gv - t.levels[0].roof_gv, t.levels[0].gf * 2.6, TOL));
+    }
+
+    #[test]
+    fn wandring_ohne_raeume_bleibt_ein_ganzes_geschoss() {
+        // Ohne Räume ist jeder Ring ein ganzes Geschoss (auch der Hofring): nichts wird ausgespart.
+        let t = area_table(&o_haus(false, false));
+        let h = area_table(&o_haus(true, false));
+        assert!(t.levels[0].roof_gv > h.levels[0].roof_gv + 50.0, "{} / {}", t.levels[0].roof_gv, h.levels[0].roof_gv);
+    }
+
     /// Musterhaus komplex (Auszug von `buildComplexSampleProject`: Geschosse, Wände, Räume, Dächer, Körper).
     /// Von Hand: Geschosse Σ GF × Höhe = 175.52·2.7 + 193.63·2.9 + 193.63·2.8 + 159.90·2.6 ≈ 1993 m³.
     /// Hauptdach auf dem DG (Sattel 38°, Traufe 7.3, Umriss = Aussenflucht 15.39 × 10.39, Überstand 0.6):

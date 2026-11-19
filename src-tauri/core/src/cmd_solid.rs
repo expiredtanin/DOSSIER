@@ -337,7 +337,7 @@ fn solid_preview(v: &Value, pts: &[V], out: &mut Shapes) {
 }
 
 /// Punkt im Polygon (Strahl-Test, `|| 1e-12` gegen waagrechte Kanten).
-fn point_in_polygon(p: V, poly: &[V]) -> bool {
+pub(crate) fn point_in_polygon(p: V, poly: &[V]) -> bool {
     let mut inside = false;
     let n = poly.len();
     let mut j = n.wrapping_sub(1);
@@ -684,43 +684,128 @@ fn ceiling_opening_ops(root: &Map<String, Value>, v: &Value, ctx: &Ctx) -> Vec<O
     vec![Op::Replace { collection: "ceilings".into(), entity: with(host, "openings", Value::Array(openings)) }]
 }
 
-/// [266] Deckenloch einer neuen Treppe: steigt sie über die ganze Geschosshöhe nach oben, wird in die Decke des
-/// Geschosses (die den ganzen Treppengrundriss enthält) eine Aussparung in der Form des Treppenumrisses gelegt.
-/// Keine solche Decke, Treppe nach unten oder nicht über die volle Höhe, oder schon ein Loch darüber → keine Op.
-/// Die Ops laufen mit der Treppe im selben Commit (ein Undo-Schritt).
-pub(crate) fn stair_hole_ops(root: &Map<String, Value>, params: &[f64], rise: f64, up: bool, ctx: &Ctx) -> Vec<Op> {
-    let floor_h = ctx.floor_height.unwrap_or(f64::NAN);
-    if !up || !(floor_h.is_finite() && rise >= floor_h - 0.05) {
+/// Lichte Kopfhöhe über dem Lauf (m): wo die Tritte näher als das an der Deckenunterkante liegen, braucht es ein Loch.
+const STAIR_HEADROOM: f64 = 2.1;
+
+/// [297] Umrisse (Grundriss) des Deckenlochs einer Treppe der Höhe `rise` unter einer Decke mit Unterkante bei
+/// `floor_h` über der Treppenbasis. Läuft sie über die ganze Geschosshöhe, ist es der Treppenumriss: Polygon (gerade, L, U,
+/// Podest) oder bei der Wendeltreppe der Kreis bzw. das Kreisstück des Laufs samt Auge. Endet sie tiefer (Teilhöhe),
+/// nur die Tritte (und anschliessende Podeste), deren Oberkante weniger als [`STAIR_HEADROOM`] unter der Decke liegt;
+/// bleibt der Abstand überall grösser, gibt es kein Loch. Die Laufrichtung (`up`) ändert nichts: sie kehrt nur den Pfeil um.
+fn stair_hole_rings(params: &[f64], rise: f64, floor_h: f64) -> Vec<Vec<V>> {
+    if !(floor_h.is_finite() && floor_h > 0.0 && rise.is_finite() && rise > 0.0) {
         return Vec::new();
     }
-    let o = crate::stair::outline(params);
-    let ring: Vec<V> = match o.first() {
-        Some(&k) if k == 0.0 && o.len() >= 2 => {
-            let n = o[1] as usize;
-            (0..n).filter_map(|i| Some((*o.get(2 + 2 * i)?, *o.get(3 + 2 * i)?))).collect()
+    let Some(sp) = crate::stair::decode_params(params) else { return Vec::new() };
+    let full = rise >= floor_h - 0.05;
+    if !full && floor_h - rise >= STAIR_HEADROOM {
+        return Vec::new();
+    }
+    let pt = |q: &kernel2d::Vec2| [q.x, q.y];
+    if full {
+        let o = crate::stair::outline(params);
+        match o.first() {
+            Some(&k) if k == 0.0 && o.len() >= 2 => {
+                let n = o[1] as usize;
+                return vec![(0..n).filter_map(|i| Some((*o.get(2 + 2 * i)?, *o.get(3 + 2 * i)?))).collect()];
+            }
+            // Wendel: Linien (4 Zahlen je 2), dann ein Bogen je 5 Zahlen (Mitte, r, a0, a1); Aussenbogen = der zweite.
+            Some(&k) if k == 1.0 && o.len() >= 1 + 8 + 10 => {
+                return vec![spiral_hole_ring((o[14], o[15]), o[16], o[17], o[18])];
+            }
+            _ => return Vec::new(),
         }
-        // Wendeltreppen (Linien + Bögen statt Polygon): Loch weiter von Hand (`deckenloch`).
-        _ => return Vec::new(),
+    }
+    let geo = kernel2d::stair_geometry(&sp, rise);
+    let limit = floor_h - STAIR_HEADROOM;
+    let sel: Vec<Vec<[f64; 2]>> = geo.treads.iter().filter(|t| t.top_rise > limit + 1e-9 && t.pts.len() >= 3).map(|t| t.pts.iter().map(pt).collect()).collect();
+    if sel.is_empty() {
+        return Vec::new();
+    }
+    let mut polys: Vec<crate::flat::Polygon> = sel.iter().cloned().map(|r| vec![r]).collect();
+    // Podeste, die an einen gewählten Tritt anschliessen (Hülle der Rechtecke + Spielraum), kommen dazu.
+    let bb = |r: &[[f64; 2]]| {
+        r.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])])
     };
-    if ring.len() < 3 || ring.iter().any(|q| !(q.0.is_finite() && q.1.is_finite())) {
-        return Vec::new();
+    let sel_bb: Vec<[f64; 4]> = sel.iter().map(|r| bb(r)).collect();
+    for l in [&geo.landing, &geo.landing2].into_iter().flatten() {
+        let r: Vec<[f64; 2]> = l.iter().map(pt).collect();
+        if r.len() < 3 {
+            continue;
+        }
+        let b = bb(&r);
+        const E: f64 = 0.05;
+        if sel_bb.iter().any(|s| s[0] <= b[2] + E && s[2] >= b[0] - E && s[1] <= b[3] + E && s[3] >= b[1] - E) {
+            polys.push(vec![r]);
+        }
     }
-    let host = arr(root.get("ceilings")).iter().find(|c| {
-        let outline = ring_of(c);
-        crate::cmd_create::floor_of(c) == Some(ctx.level) && outline.len() >= 3 && ring.iter().all(|q| point_in_polygon(*q, &outline))
-    });
-    let Some(host) = host else { return Vec::new() };
-    let mut openings = arr(field(host, "openings")).to_vec();
-    // Ein bestehendes Loch, das den Umriss schon enthält, genügt.
-    let covered = openings.iter().any(|h| {
-        let hr: Vec<V> = arr(Some(h)).iter().map(xy).collect();
-        hr.len() >= 3 && ring.iter().all(|q| point_in_polygon(*q, &hr))
-    });
-    if covered {
-        return Vec::new();
+    crate::polygon_bool::union(&polys).into_iter().filter_map(|p| p.into_iter().next()).map(|r| r.into_iter().map(|q| (q[0], q[1])).collect()).collect()
+}
+
+/// Kreis (Vollkreis ab 359°) oder Kreisstück samt Mitte (Auge) um `c` mit Radius `r` von `a0` nach `a1`, als Vieleck,
+/// dessen Ecken ausserhalb des Bogens liegen (Sehnen berühren ihn), damit die Treppe ganz im Loch liegt.
+fn spiral_hole_ring(c: (f64, f64), r: f64, a0: f64, a1: f64) -> Vec<V> {
+    let sweep = a1 - a0;
+    let full = sweep.abs() >= 359.0_f64.to_radians();
+    let n = ((sweep.abs() / 5.0_f64.to_radians()).ceil() as usize).clamp(8, 720);
+    let da = sweep / n as f64;
+    let rr = r / (da.abs() / 2.0).cos();
+    let mut ring: Vec<V> = Vec::new();
+    if !full {
+        ring.push(c);
+        ring.push((c.0 + r * a0.cos(), c.1 + r * a0.sin()));
     }
-    openings.push(pvs(&ring));
-    vec![Op::Replace { collection: "ceilings".into(), entity: with(host, "openings", Value::Array(openings)) }]
+    for i in 0..n {
+        let a = a0 + da * (i as f64 + 0.5);
+        ring.push((c.0 + rr * a.cos(), c.1 + rr * a.sin()));
+    }
+    if !full {
+        ring.push((c.0 + r * a1.cos(), c.1 + r * a1.sin()));
+    }
+    ring
+}
+
+/// [266] Deckenloch einer neuen Treppe: erreicht sie die Decke ihres Geschosses (ganze Höhe, Wendel, Teilhöhe mit zu
+/// geringer Kopfhöhe, [297]), wird in diese Decke eine Aussparung in der Form des Treppenumrisses ([`stair_hole_rings`])
+/// gelegt; die Decke muss den ganzen Umriss enthalten. Keine solche Decke oder schon ein Loch darüber → keine Op.
+/// Die Ops laufen mit der Treppe im selben Commit (ein Undo-Schritt).
+pub(crate) fn stair_hole_ops(root: &Map<String, Value>, params: &[f64], rise: f64, _up: bool, ctx: &Ctx) -> Vec<Op> {
+    let rings = stair_hole_rings(params, rise, ctx.floor_height.unwrap_or(f64::NAN));
+    let ceilings = arr(root.get("ceilings"));
+    let mut hosts: Vec<(Value, Vec<Value>)> = Vec::new();
+    for ring in rings {
+        if ring.len() < 3 || ring.iter().any(|q| !(q.0.is_finite() && q.1.is_finite())) {
+            continue;
+        }
+        let Some(host) = ceilings.iter().find(|c| {
+            let outline = ring_of(c);
+            crate::cmd_create::floor_of(c) == Some(ctx.level) && outline.len() >= 3 && ring.iter().all(|q| point_in_polygon(*q, &outline))
+        }) else {
+            continue;
+        };
+        let id = id_of(host).unwrap_or("").to_string();
+        let slot = match hosts.iter().position(|(h, _)| id_of(h).unwrap_or("") == id) {
+            Some(i) => i,
+            None => {
+                hosts.push((host.clone(), arr(field(host, "openings")).to_vec()));
+                hosts.len() - 1
+            }
+        };
+        let openings = &mut hosts[slot].1;
+        // Ein bestehendes Loch, das den Umriss schon enthält, genügt.
+        let covered = openings.iter().any(|h| {
+            let hr: Vec<V> = arr(Some(h)).iter().map(xy).collect();
+            hr.len() >= 3 && ring.iter().all(|q| point_in_polygon(*q, &hr))
+        });
+        if !covered {
+            openings.push(pvs(&ring));
+        }
+    }
+    hosts
+        .into_iter()
+        .filter(|(h, o)| o.len() != arr(field(h, "openings")).len())
+        .map(|(h, o)| Op::Replace { collection: "ceilings".into(), entity: with(&h, "openings", Value::Array(o)) })
+        .collect()
 }
 
 /// Dachfenster / Deckenöffnung mit Oberlicht ([103]): ein Klick setzt die Öffnung (Mitte im Grundriss) in das

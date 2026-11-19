@@ -1844,10 +1844,47 @@ mod tests {
             let (x, y) = (q["x"].as_f64().unwrap(), q["y"].as_f64().unwrap());
             assert!((0.9..=5.1).contains(&x) && (1.4..=2.6).contains(&y), "{x},{y}");
         }
-        // abwärts, Teilhöhe, ausserhalb der Decke → nur die Treppe
-        assert_eq!(stair([1.0, 2.0], [5.0, 2.0], false, Value::Null).len(), 1);
-        assert_eq!(stair([1.0, 2.0], [5.0, 2.0], true, json!(1.5)).len(), 1);
+        // ausserhalb der Decke → nur die Treppe
         assert_eq!(stair([7.0, 2.0], [11.0, 2.0], true, Value::Null).len(), 1);
+        // [297] „nach unten“ kehrt nur den Pfeil um: gleiches Loch in der Decke des eigenen Geschosses
+        let d = stair([1.0, 2.0], [5.0, 2.0], false, Value::Null);
+        assert_eq!(d.len(), 2);
+        assert_eq!(d[1].to_json()["entity"]["openings"], o[1].to_json()["entity"]["openings"]);
+        // Teilhöhe (Geschoss 3 m): Kopfhöhe < 2.1 m nur über den oberen Tritten (Tritt-Oberkante > 0.9 m)
+        let t = stair([1.0, 2.0], [5.0, 2.0], true, json!(1.5));
+        assert_eq!(t.len(), 2);
+        let xs: Vec<f64> = t[1].to_json()["entity"]["openings"][0].as_array().unwrap().iter().map(|q| q["x"].as_f64().unwrap()).collect();
+        let (lo, hi) = xs.iter().fold((f64::MAX, f64::MIN), |(a, b), x| (a.min(*x), b.max(*x)));
+        assert!(lo > 2.5 && (hi - 5.0).abs() < 0.1, "Teilloch nur im oberen Teil: {lo}..{hi}");
+        // so niedrig, dass überall Kopfhöhe bleibt (3 − 0.8 ≥ 2.1) → kein Loch
+        assert_eq!(stair([1.0, 2.0], [5.0, 2.0], true, json!(0.8)).len(), 1);
+    }
+
+    /// [297] Wendeltreppe: Loch = Kreisstück des Laufs samt Auge, die ganze Treppe liegt darin.
+    #[test]
+    fn wendeltreppe_legt_deckenloch_an() {
+        let ceil = json!({"id": "C1", "type": "ceiling", "floorId": "F1", "outline": [{"x": 0, "y": 0}, {"x": 8, "y": 0}, {"x": 8, "y": 6}, {"x": 0, "y": 6}]});
+        let r = root(json!({"ceilings": [ceil]}));
+        let t = crate::model::lenient::typed_for_test(&r);
+        let v = json!({"cmd": "stair", "shape": "spiral", "up": true, "width": 0.9, "referenz": "mitte", "treadMode": "without",
+            "auftritt": 0.28, "steps": null, "rise": null, "start": {"x": 3.0, "y": 3.0}, "cursor": {"x": 4.0, "y": 3.0}});
+        let o = ops(&r, &t, &req(v)).unwrap();
+        assert_eq!(o.len(), 2, "Wendeltreppe + Aussparung");
+        let ring: Vec<(f64, f64)> = o[1].to_json()["entity"]["openings"][0].as_array().unwrap().iter().map(|q| (q["x"].as_f64().unwrap(), q["y"].as_f64().unwrap())).collect();
+        assert!(ring.len() > 20, "Bogen ist ein feines Vieleck");
+        let inside = |q: (f64, f64)| crate::cmd_solid::point_in_polygon(q, &ring);
+        for q in &ring {
+            assert!(hypot2(q.0 - 3.0, q.1 - 3.0) <= 1.45 * 1.002 + 1e-6, "{q:?}");
+        }
+        // Auge und der Lauf (0°–270° gegen den Uhrzeigersinn, bis zum Aussenrand) liegen im Loch, die Lücke (315°) nicht
+        assert!(inside((3.0, 3.0)));
+        for deg in [2.0_f64, 90.0, 180.0, 268.0] {
+            let (c, sn) = (deg.to_radians().cos(), deg.to_radians().sin());
+            for r in [0.1, 1.0, 1.44] {
+                assert!(inside((3.0 + r * c, 3.0 + r * sn)), "{deg}° r={r}");
+            }
+        }
+        assert!(!inside((3.0 + 1.0 * 0.7071, 3.0 - 1.0 * 0.7071)));
     }
 
     fn pos_or(p: &Preview) -> f64 {

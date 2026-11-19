@@ -226,15 +226,35 @@ fn wall_polygons(p: &Project, level_id: &str) -> Vec<Polygon> {
         .collect()
 }
 
-/// [266] Grundriss eines Geschosses für das GV: Vereinigung der Wand- und Raumgrundrisse (ohne AGF), Löcher
-/// gefüllt (Wandring ohne Räume = ganzes Geschoss); leer ohne Wände/Räume.
+/// Kleinste Fläche (m²) eines unbebauten Lochs im Geschossgrundriss, das als Innenhof gilt ([297]); kleinere
+/// Durchbrüche (Schächte, Lücken zwischen Wänden) bleiben im Volumen.
+const COURTYARD_MIN_AREA: f64 = 1.0;
+
+/// [266] Grundriss eines Geschosses für das GV: Vereinigung der Wand- und Raumgrundrisse (ohne AGF); leer ohne
+/// Wände/Räume. Ein Wandring ohne Räume ist ein ganzes Geschoss (Löcher gefüllt). [297] Hat das Geschoss Räume, ist
+/// ein Loch ab [`COURTYARD_MIN_AREA`], das weder Wand noch Raum deckt, ein Innenhof: nach oben offen, ausserhalb
+/// der Begrenzung (SIA 416), also bleibt es als Aussparung im Grundriss und bekommt weder Geschossquader noch Dachraum.
 fn footprint(p: &Project, level_id: &str) -> Vec<Polygon> {
     let mut parts = wall_polygons(p, level_id);
-    parts.extend(room_polygons(p, level_id, |c| c < CATEGORIES && c != AGF));
+    let rooms = room_polygons(p, level_id, |c| c < CATEGORIES && c != AGF);
+    let has_rooms = !rooms.is_empty();
+    parts.extend(rooms);
     if parts.is_empty() {
         return Vec::new();
     }
-    let outers: Vec<Polygon> = polygon_bool::union(&parts).into_iter().filter_map(|poly| poly.into_iter().next()).map(|r| vec![r]).collect();
+    let merged = polygon_bool::union(&parts);
+    if has_rooms {
+        return merged
+            .into_iter()
+            .map(|mut poly| {
+                let outer = poly.remove(0);
+                let mut out = vec![outer];
+                out.extend(poly.into_iter().filter(|h| signed_area(h).abs() >= COURTYARD_MIN_AREA));
+                out
+            })
+            .collect();
+    }
+    let outers: Vec<Polygon> = merged.into_iter().filter_map(|poly| poly.into_iter().next()).map(|r| vec![r]).collect();
     polygon_bool::union(&outers)
 }
 
