@@ -10,7 +10,7 @@ Wer zu einer ID mehr wissen will (Entscheide, Tests, Bilder), sucht dort nach `*
   stehen im Archiv („Bewusst nicht übernommen“).
 - **Grösse** (eine Person mit Agenten): S ≤ 1 Tag · M ≤ 1 Woche · L ≤ 1 Monat · XL > 1 Monat.
   Steht keine Grösse im Archiv, ist sie hier geschätzt.
-- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 297);
+- **IDs sind stabil.** Neue ID = nächste freie Zahl nach der höchsten im Archiv und hier (aktuell 298);
   nie eine ID wiederverwenden oder umnummerieren. Präfix-IDs (`[K]`, `[G]`, `[T]`, `[B]`, `[C]`) bleiben.
 - **Pro Punkt:** was fehlt · wo im Code · Grösse. Höchstens ein bis drei Sätze je Punkt;
   Messwerte und Befunde gehören in den Commit.
@@ -392,3 +392,4 @@ exakte Durchdringung, [61] Zuordnung per Hand, [63] Profil je Kante, [70] Fläch
 - [237] Sichtprüfung der Oberflächen im Browser (13.11.)
 - [238] Sichtprüfung, grössere Befunde aus [237] (13.11.)
 - [297] Deckenloch für Wendel-/Teilhöhen-Treppen und Innenhöfe im GV (19.11., Bild `doc/review-297/wendel.png`)
+- [298] Wendel: Lauflinie als Bogen statt Sehnenzug, Pfeil tangential (19.11., `plan/stair_symbol.rs` `arc_run_line`; Goldens und Mac nicht geprüft)

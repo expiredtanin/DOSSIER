@@ -355,6 +355,42 @@ fn ray_line(a: Vec2, d: Vec2, c: Vec2, e: Vec2) -> Option<f64> {
 /// [173] Lauflinie von der Antrittskante (Vorderkante der ersten Stufe) bis zur Austrittskante (Hinterkante
 /// der letzten): die Geometrie (`kernel2d::stair_geometry`) rückt sie um eine halbe Stufe bzw. 15 % der letzten
 /// Stufe ein; hier auf die Kanten verlängert, dann um `run.start`/`run.end` gekürzt und der Pfeil neu gesetzt.
+/// [298] Wendel: Die Lauflinie kommt als Zug durch die Trittmitten (eine Sehne je Stufe) und wirkte im Grundriss eckig.
+/// Hier wird sie zum Bogen um die Treppenmitte unterteilt (höchstens 3° je Stück, Radius zwischen den Punkten
+/// linear), vor dem Verlängern zur Kante und dem Pfeil — der Pfeil folgt so der Tangente statt der Sehne.
+fn arc_run_line(geo: &mut StairGeometry, c: Vec2) {
+    let max_step = 3.0_f64.to_radians();
+    let rl = &geo.run_line;
+    if rl.len() < 2 || !(c.x.is_finite() && c.y.is_finite()) {
+        return;
+    }
+    let mut out = vec![rl[0]];
+    for w in rl.windows(2) {
+        let (a, b) = (sub(w[0], c), sub(w[1], c));
+        let (ra, rb) = (len(a), len(b));
+        let (ta, tb) = (jsnum::atan2(a.y, a.x), jsnum::atan2(b.y, b.x));
+        let mut d = tb - ta;
+        while d > std::f64::consts::PI {
+            d -= std::f64::consts::TAU;
+        }
+        while d < -std::f64::consts::PI {
+            d += std::f64::consts::TAU;
+        }
+        let n = (d.abs() / max_step).ceil().max(1.0).min(64.0) as usize;
+        if !(ra > 1e-6 && rb > 1e-6) || n == 1 {
+            out.push(w[1]);
+            continue;
+        }
+        for k in 1..n {
+            let t = k as f64 / n as f64;
+            let (r, th) = (ra + (rb - ra) * t, ta + d * t);
+            out.push(Vec2::new(c.x + r * jsnum::cos(th), c.y + r * jsnum::sin(th)));
+        }
+        out.push(w[1]);
+    }
+    geo.run_line = out;
+}
+
 fn run_line_to_edges(geo: &mut StairGeometry, spiral: bool, run: &RunOpts) {
     let n = geo.run_line.len();
     if n < 2 || geo.treads.is_empty() {
@@ -545,6 +581,9 @@ pub fn plan_stair_run(params: &[f64], total_rise: f64, cut_rise: f64, lw_mm: f64
 
     // 5. Lauflinie und Pfeil (Flügel als ein Zug über die Spitze: die Ecke schliesst spitz).
     // [173] Von der Antritts- bis zur Austrittskante, Versatz und Antrittspunkt nach der Modelldarstellung.
+    if let (true, Some(c)) = (spiral, center.or(p.center)) {
+        arc_run_line(&mut geo, c);
+    }
     run_line_to_edges(&mut geo, spiral, run);
     if let (Some(r), Some(a)) = (run.start_mark.filter(|r| *r > 0.0 && r.is_finite()), geo.run_line.first().copied()) {
         let pts: Vec<Vec2> = (0..16).map(|k| { let t = std::f64::consts::TAU * k as f64 / 16.0; Vec2::new(a.x + r * jsnum::cos(t), a.y + r * jsnum::sin(t)) }).collect();
@@ -1016,6 +1055,21 @@ mod tests {
         let with = plan_stair_run(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false, &[], &RunOpts { start_mark: Some(0.04), ..Default::default() });
         let without = plan_stair(&straight(), 2.8, 1.0, 0.25, false, 0.0, 0, false);
         assert_eq!(tags(&with).iter().filter(|x| **x == 1.0).count(), tags(&without).iter().filter(|x| **x == 1.0).count() + 1, "Antrittspunkt");
+    }
+
+    /// [298] Wendel: Lauflinie als Bogen (fein unterteilt, alle Punkte auf dem Lauflinien-Radius), nicht als Sehnenzug.
+    #[test]
+    fn wendel_lauflinie_ist_rund() {
+        let p = decode_params(&forms().into_iter().find(|f| f.0 == "Wendel").unwrap().1).unwrap();
+        let mut g = stair_geometry(&p, 2.8);
+        let before = g.run_line.len();
+        let c = stair_outline(&p).spiral.as_ref().map(|s| s.arcs[0].0).unwrap();
+        arc_run_line(&mut g, c);
+        assert!(g.run_line.len() >= 270 / 3, "{before} -> {}", g.run_line.len());
+        let r0 = len(sub(g.run_line[0], c));
+        for q in &g.run_line {
+            assert!((len(sub(*q, c)) - r0).abs() < 1e-3, "Punkt nicht auf dem Bogen: {}", len(sub(*q, c)));
+        }
     }
 
     fn forms() -> Vec<(&'static str, Vec<f64>)> {
