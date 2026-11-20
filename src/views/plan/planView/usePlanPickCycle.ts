@@ -71,6 +71,8 @@ export interface UsePlanPickCycleArgs {
   toolMods: (e: React.PointerEvent | React.MouseEvent) => { shift: boolean; ctrl: boolean; alt: boolean; };
   marquee: React.MutableRefObject<{ pointerId: number; startClientX: number; startClientY: number; startView: Vec2; moved: boolean; } | null>;
   onMarquee: ((selection: MarqueeSelection) => void) | undefined;
+  /** [317] Schnitt/Ansicht: Rahmen wählt auch Stützen, Dächer, Öffnungen und Körper. */
+  sheetBodies?: boolean;
   marqueeHitAll: (rect: ModelRect, crossing: boolean) => string[];
   setMarqueeRect: React.Dispatch<React.SetStateAction<{ x: number; y: number; w: number; h: number; crossing: boolean; } | null>>;
   drag: React.MutableRefObject<{ pointerId: number; startClientX: number; startClientY: number; startView: ViewBox; } | null>;
@@ -127,6 +129,7 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
     toolMods,
     marquee,
     onMarquee,
+    sheetBodies,
     marqueeHitAll,
     setMarqueeRect,
     drag,
@@ -572,6 +575,15 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
                   .map((id) => id.slice(CAMERA_PICK.length)),
               ),
             ],
+            // [317] Schnitt/Ansicht: auch Stützen/Träger, Dächer, Fenster/Türen und Körper per Rahmen.
+            ...(sheetBodies
+              ? {
+                  columnIds: getPick().marquee("columnId", rect, crossing),
+                  roofIds: getPick().marquee("roofId", rect, crossing),
+                  openingIds: getPick().marquee("openingId", rect, crossing),
+                  solidIds: getPick().marquee("extrudedSolidId", rect, crossing),
+                }
+              : {}),
             crossing,
           });
         }

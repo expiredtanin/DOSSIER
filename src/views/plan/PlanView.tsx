@@ -278,6 +278,10 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     startViewRef, // [204] Papier-Massstab folgt der Startansicht
     resetKey: viewKey, // Papier-Massstab folgt dem Einpassen
   });
+  // [317] Test-Naht: der gezeigte Plan für die e2e-Prüfung der Anwahl (nur mit `?dossierTest`, sonst fehlt die Funktion).
+  useEffect(() => {
+    (window as unknown as { __dossierPlanProbe?: (p: typeof plan) => void }).__dossierPlanProbe?.(plan);
+  }, [plan]);
   // [165] Steuerhandle, Zieh-Zustände, Koordinaten-Umrechnung und Griff-Treffer.
   const {
     drag,
@@ -515,6 +519,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
     toolMods,
     marquee,
     onMarquee,
+    sheetBodies,
     marqueeHitAll,
     setMarqueeRect,
     drag,

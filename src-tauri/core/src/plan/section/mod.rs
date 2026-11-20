@@ -255,6 +255,8 @@ pub struct Cut {
     pub stair_id: Option<String>,
     /// [279] Geländer, zu dem das Band gehört (Pick `@railing:<id>`).
     pub railing_id: Option<String>,
+    /// [317] Stütze oder Träger, zu dem das Band gehört (Pick `columnId`; vorher fälschlich als Decke).
+    pub column_id: Option<String>,
     /// [33] Index der Schicht im Aufbau des Bauteils (Wand-, Decken-, Dachtyp), wo bekannt.
     pub layer_index: Option<usize>,
     /// [33] Override der Schicht (nur beim Zeichnen gesetzt, [`cut_overrides`]).
@@ -263,7 +265,7 @@ pub struct Cut {
 
 impl Cut {
     pub(crate) fn new(kind: Kind, index: usize, pts: Vec<[f64; 2]>) -> Cut {
-        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None, railing_id: None, layer_index: None, ov: None }
+        Cut { kind, index, pts, nse: None, fill: None, hatch: None, join_priority: None, component_id: None, source_id: None, category: None, stair_id: None, railing_id: None, column_id: None, layer_index: None, ov: None }
     }
 }
 

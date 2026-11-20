@@ -18,6 +18,7 @@ import { BUILTIN_PANEL_IDS } from "../panels/builtinPanels";
 import { hiddenFloorIds, itemDisplay } from "../panels/displayMode";
 import { renderJob } from "./renderJob";
 import { CyclesCancelled } from "../core";
+import type { Plan } from "../core";
 
 declare global {
   interface Window {
@@ -49,6 +50,10 @@ declare global {
         contours: { id: string; zs: number[] }[];
         excavations: { id: string; bottom: number }[];
       };
+      /** [317] Klickpunkte der Bauteile des gezeigten Plans (Schnitt/Ansicht): je Pick-Id ein Modellpunkt, an dem nur dieses Bauteil liegt. */
+      viewPickPoints: () => { key: string; id: string; x: number; y: number; covered: boolean; /** Gibt es das Element mit dieser Id im Projekt? */ known: boolean }[];
+      /** [317] Pick-Polygone des gezeigten Plans an einem Modellpunkt (Index in `primitives`, Art, Id), unterste zuerst. */
+      viewPolysAt: (x: number, y: number) => string[];
       /** [144] Auswahl setzen (wie ein Klick), z. B. `{ openings: ["D1"] }`. */
       select: (patch: Record<string, string[]>) => void;
       /** [144] Punkte einer Bemassung (Kette) — folgt sie der Öffnung? */
@@ -115,7 +120,77 @@ declare global {
   }
 }
 
+// [317] Der Plan, den die Plan-Ansicht gerade zeigt (`PlanView` meldet ihn über `__dossierPlanProbe`).
+let lastPlan: Plan | null = null;
+
+const PICK_KEYS = ["wallId", "ceilingId", "openingId", "stairId", "roofId", "columnId", "extrudedSolidId", "drawingId", "roomId"] as const;
+
+/** [317] Pro Pick-Id ein Punkt in der Fläche, den kein anderes Bauteil-Polygon (mit Id) überdeckt. */
+const KEY_LIST: Record<string, string> = { wallId: "walls", ceilingId: "ceilings", openingId: "openings", stairId: "stairs", roofId: "roofs", columnId: "columns", extrudedSolidId: "extrudedSolids", drawingId: "drawings2d", roomId: "rooms", treeId: "trees", railingId: "railings", contextObjectId: "context" };
+
+function pickPoints(plan: Plan): { key: string; id: string; x: number; y: number; covered: boolean; known: boolean }[] {
+  type Poly = { key: string; id: string; pts: { x: number; y: number }[] };
+  const project = getState().project as unknown as Record<string, { id: string }[] | undefined>;
+  const known = (key: string, id: string): boolean => {
+    const list = project[KEY_LIST[key]] ?? [];
+    return list.some((e) => e.id === id) || (key === "columnId" && (project.beams ?? []).some((e) => e.id === id)) || (key === "contextObjectId" && id.startsWith("@"));
+  };
+  const polys: Poly[] = [];
+  for (const pr of plan.primitives) {
+    if (pr.kind !== "polygon" || pr.pts.length < 3) continue;
+    const o = pr as unknown as Record<string, string | undefined>;
+    let key: string | null = null;
+    let id: string | undefined;
+    for (const k of PICK_KEYS) if (o[k]) { key = k; id = o[k]; break; }
+    const c = o.contextObjectId;
+    if (!key && c) { key = c.startsWith("@tree:") ? "treeId" : c.startsWith("@railing:") ? "railingId" : c.startsWith("@") ? null : "contextObjectId"; id = c.replace(/^@(tree|railing):/, ""); }
+    if (key && id) polys.push({ key, id, pts: pr.pts });
+  }
+  const inside = (q: { x: number; y: number }, pts: { x: number; y: number }[]) => {
+    let r = false;
+    for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+      if (pts[i].y > q.y !== pts[j].y > q.y && q.x < ((pts[j].x - pts[i].x) * (q.y - pts[i].y)) / (pts[j].y - pts[i].y) + pts[i].x) r = !r;
+    }
+    return r;
+  };
+  const out = new Map<string, { key: string; id: string; x: number; y: number; covered: boolean; known: boolean }>();
+  for (const [pi, pg] of polys.entries()) {
+    const k = `${pg.key}:${pg.id}`;
+    if (out.get(k) && !out.get(k)!.covered) continue;
+    const xs = pg.pts.map((q) => q.x), ys = pg.pts.map((q) => q.y);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    let found: { x: number; y: number } | null = null;
+    let any: { x: number; y: number } | null = null;
+    let foundD = -1;
+    let anyD = -1;
+    // Rand-Abstand: der Punkt mit dem grössten Abstand zur Umrisslinie (Bildschirm-Rundung soll ihn nicht kippen).
+    const edgeDist = (q: { x: number; y: number }) => {
+      let d = Infinity;
+      for (let i = 0, j = pg.pts.length - 1; i < pg.pts.length; j = i++) {
+        const a = pg.pts[j], b = pg.pts[i];
+        const dx = b.x - a.x, dy = b.y - a.y;
+        const l2 = dx * dx + dy * dy;
+        const t = l2 === 0 ? 0 : Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2));
+        d = Math.min(d, Math.hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy)));
+      }
+      return d;
+    };
+    const N = 13;
+    for (let i = 1; i < N; i++) for (let j = 1; j < N; j++) {
+      const q = { x: x0 + ((x1 - x0) * i) / N, y: y0 + ((y1 - y0) * j) / N };
+      if (!inside(q, pg.pts)) continue;
+      const d = edgeDist(q);
+      if (d > anyD) { any = q; anyD = d; }
+      if (d > foundD && !polys.some((o2, oi) => oi > pi && (o2.key !== pg.key || o2.id !== pg.id) && o2.key !== "contextObjectId" && inside(q, o2.pts))) { found = q; foundD = d; }
+    }
+    if (found) out.set(k, { key: pg.key, id: pg.id, ...found, covered: false, known: known(pg.key, pg.id) });
+    else if (any && !out.has(k)) out.set(k, { key: pg.key, id: pg.id, ...any, covered: true, known: known(pg.key, pg.id) });
+  }
+  return [...out.values()];
+}
+
 export function installTestHooks(): void {
+  (window as unknown as { __dossierPlanProbe?: (p: Plan) => void }).__dossierPlanProbe = (p) => { lastPlan = p; };
   window.__dossierTest = {
     corePanic: () => {
       try {
@@ -158,6 +233,24 @@ export function installTestHooks(): void {
     selectionAction: (id) => runSelectionAction(id),
     walls: () => getState().project.walls.map((w) => ({ id: w.id, start: { ...w.start }, end: { ...w.end } })),
     select: (patch) => getState().setSelection(patch),
+    viewPickPoints: () => (lastPlan ? pickPoints(lastPlan) : []),
+    viewPolysAt: (x, y) => {
+      if (!lastPlan) return [];
+      const q = { x, y };
+      const inside = (pts: { x: number; y: number }[]) => {
+        let r = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if (pts[i].y > q.y !== pts[j].y > q.y && q.x < ((pts[j].x - pts[i].x) * (q.y - pts[i].y)) / (pts[j].y - pts[i].y) + pts[i].x) r = !r;
+        return r;
+      };
+      const out: string[] = [];
+      lastPlan.primitives.forEach((pr, i) => {
+        if (pr.kind !== "polygon" || !inside(pr.pts)) return;
+        const o = pr as unknown as Record<string, string | undefined>;
+        const key = [...PICK_KEYS, "contextObjectId"].find((k) => o[k]);
+        out.push(`${i}:${key ?? "-"}:${key ? o[key] : ""}`);
+      });
+      return out;
+    },
     dimPts: (id) => {
       const g = getState().project.drawings2d.find((d) => d.id === id)?.geom;
       return g?.shape === "dimension" ? g.pts.map((p) => ({ x: p.x, y: p.y })) : [];

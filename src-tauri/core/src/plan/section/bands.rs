@@ -699,6 +699,7 @@ pub(super) fn attach_cut_styles(cuts: Vec<Cut>, p: &Project, plane: &Plane, wall
                             _ => unreachable!(),
                         };
                         cp.source_id = Some(id.clone());
+                        cp.column_id = Some(id.clone());
                         cp.category = Some(code.clone());
                         let comp = component_id.as_deref().filter(|s| !s.is_empty()).and_then(|id| p.component(id));
                         if let Some(k) = comp {
@@ -876,6 +877,7 @@ pub(super) fn subtract_dominant_bands(bands: Vec<Cut>) -> Vec<Cut> {
             // Herkunft bleibt am Stück (Ebenen-Sichtbarkeit, Treppen-Pick).
             c.category = src.category.clone();
             c.stair_id = src.stair_id.clone();
+            c.column_id = src.column_id.clone();
             c.layer_index = src.layer_index;
             c
         })
