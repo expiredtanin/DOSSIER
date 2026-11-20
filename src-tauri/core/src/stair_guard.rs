@@ -305,6 +305,27 @@ mod tests {
         assert!(!crate::model3d::pick_stair_railings(&p).is_empty());
     }
 
+    /// [304] Die Absturzsicherung steht auf der Decke mit dem Loch und folgt deren Geschoss, nicht dem der Treppe:
+    /// OG aus -> weg (Handlauf der EG-Treppe bleibt), nur OG an -> sie bleibt, der Handlauf geht mit EG. Klassen-/Element-Filter
+    /// der Treppe selbst blenden sie weiterhin aus.
+    #[test]
+    fn absturzsicherung_folgt_dem_geschoss_der_decke() {
+        use crate::model3d::{parts_filtered, ClassFilter, Owner};
+        let p = with_hole();
+        let counts = |text: &str| {
+            let f = ClassFilter::from_text(&p, text);
+            let parts = parts_filtered(&p, true, 2.0, false, &f).unwrap();
+            let guards = parts.stair_railings.iter().filter(|m| matches!(m.owner, Owner::StairGuard(..))).count();
+            (parts.stair_railings.len() - guards, guards)
+        };
+        let (hand, guard) = counts("");
+        assert!(guard > 0);
+        assert_eq!(counts(r#"{"hideFloors":["og"]}"#), (hand, 0), "OG aus: Sicherung weg");
+        assert_eq!(counts(r#"{"hideFloors":["eg"]}"#), (0, guard), "EG aus: Sicherung auf der OG-Decke bleibt");
+        assert_eq!(counts(r#"{"hideIds":["ST1"]}"#), (0, 0), "Treppe aus: auch ihre Sicherung");
+        assert_eq!(counts(r#"{"hide":["40"]}"#).1, 0, "Klasse der Treppe aus");
+    }
+
     /// IFC: eigenes Geländer (GUARDRAIL) an der Treppe, mit Länge als Basismenge.
     #[test]
     fn absturzsicherung_im_ifc_teil() {

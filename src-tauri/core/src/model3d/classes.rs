@@ -37,6 +37,9 @@ pub enum Owner {
     /// [279] Index in `Project::railings`.
     Railing(usize),
     Stair(usize),
+    /// [304] Absturzsicherung am Deckenloch: Treppe (Index in `Project::stairs`) und Geschoss der Decke mit dem Loch
+    /// (Index in `Project::drawing_levels`) — sie folgt diesem Geschoss, nicht dem der Treppe.
+    StairGuard(usize, usize),
     Context(usize),
     /// [115] Index in `Project::extruded_solids`.
     Solid(usize),
@@ -57,7 +60,7 @@ impl Owner {
             Owner::Beam(i) => at(&p.beams, i).map(|e| e.id.as_str()),
             Owner::Tree(i) => at(&p.trees, i).map(|e| e.id.as_str()),
             Owner::Railing(i) => at(&p.railings, i).map(|e| e.id.as_str()),
-            Owner::Stair(i) => at(&p.stairs, i).map(|e| e.id.as_str()),
+            Owner::Stair(i) | Owner::StairGuard(i, _) => at(&p.stairs, i).map(|e| e.id.as_str()),
             Owner::Context(i) => at(&p.context, i).map(|e| e.id()),
             Owner::Solid(i) => at(&p.extruded_solids, i).map(|e| e.id.as_str()),
             Owner::Drawing(i) => p.drawings2d.get(i).map(|d| d.id.as_str()),
@@ -107,6 +110,10 @@ pub struct ClassFilter {
     ids: HashSet<String>,
     /// [180] Elemente, die nicht anwählbar sind (ausgeblendet oder gesperrt; graue bleiben anwählbar).
     pick: HashSet<String>,
+    /// [304] Geschosse mit ausgeschaltetem Auge (für Teile, die dem Geschoss ihrer Lage folgen: Absturzsicherung).
+    floors: HashSet<String>,
+    /// [304] Elemente, die nur wegen ihres Geschosses fehlen (nicht wegen Klasse, Einzel-Ausblendung oder Auswahl).
+    floor_only: HashSet<String>,
 }
 
 impl ClassFilter {
@@ -126,7 +133,7 @@ impl ClassFilter {
         codes.extend(extra.iter().cloned());
         let mut ids = HashSet::new();
         if codes.is_empty() && sel.is_empty() {
-            return ClassFilter { codes, ids, pick: HashSet::new() };
+            return ClassFilter { codes, ids, pick: HashSet::new(), ..Default::default() };
         }
         // Gewählte Öffnungen bringen ihren Wirt mit (eine Öffnung ohne Wand gibt es im 3D nicht).
         let only: Option<HashSet<&str>> = sel.only.as_ref().map(|o| {
@@ -142,8 +149,13 @@ impl ClassFilter {
         let mut hidden = HashSet::new();
         let mut grey = HashSet::new();
         let mut locked = HashSet::new();
+        let mut floor_only = HashSet::new();
         let mut add = |code: &str, id: &str, floor: &str| {
-            if codes.contains(code) || sel.hide.contains(id) || sel.hide_floors.contains(floor) || only.as_ref().is_some_and(|o| !o.contains(id)) {
+            let other = codes.contains(code) || sel.hide.contains(id) || only.as_ref().is_some_and(|o| !o.contains(id));
+            if other || sel.hide_floors.contains(floor) {
+                if !other {
+                    floor_only.insert(id.to_owned());
+                }
                 hidden.insert(id.to_owned());
             } else if sel.grey.contains(code) || sel.grey_floors.contains(floor) || sel.grey_ids.contains(id) {
                 grey.insert(id.to_owned());
@@ -217,7 +229,10 @@ impl ClassFilter {
             ids = hidden;
             ids.extend(grey);
         }
-        ClassFilter { codes, ids, pick }
+        if sel.ghost {
+            floor_only.clear();
+        }
+        ClassFilter { codes, ids, pick, floors: sel.hide_floors.clone(), floor_only }
     }
 
     /// `text` der 3D-Abfragen: `{"hide": [codes], "only": [ids], "hideIds": [ids], "grey": [codes], "greyFloors": [ids], "lock": [codes],
@@ -278,6 +293,13 @@ impl ClassFilter {
 
     /// Teil mit Herkunft `o` (Index in den Listen von `p`) sichtbar.
     pub fn keep_owner(&self, p: &Project, o: Owner) -> bool {
+        // [304] Absturzsicherung: Geschoss der Decke entscheidet; die Treppe darf nur wegen ihres Geschosses fehlen.
+        if let Owner::StairGuard(_, fi) = o {
+            if p.drawing_levels.get(fi).is_some_and(|f| self.floors.contains(&f.id)) {
+                return false;
+            }
+            return o.id(p).is_none_or(|id| !self.ids.contains(id) || self.floor_only.contains(id));
+        }
         o.id(p).is_none_or(|id| !self.ids.contains(id))
     }
 
