@@ -41,6 +41,7 @@ import {
   sheetModelToMm,
   sheetSizeMm,
   visibleCodesFromSnapshot,
+  titleBlockNameLines,
 } from "./layoutModel";
 
 /** Minimaler Ausschnitt (nur die im Layout-System genutzten Felder tragen Werte). */
@@ -647,5 +648,18 @@ describe("Kern-Rechnung: Sonderfälle", () => {
     const tb = resolveTitleBlock(p, l, m, "2026-01-01");
     expect(tb.author).toBe("Ann");
     expect(tb.date).toBe("\u0085");
+  });
+});
+
+describe("[324] Schriftfeld: Projektname", () => {
+  it("kurzer Name bleibt einzeilig, langer wird umgebrochen statt gekürzt", () => {
+    const short = titleBlockNameLines("Musterhaus");
+    expect(short.lines).toEqual(["Musterhaus"]);
+    expect(short.scale).toBe(1);
+    const long = titleBlockNameLines("Musterhaus komplex, Musterweg 7, Zürich");
+    expect(long.lines.length).toBe(2);
+    expect(long.lines.join(" ")).toBe("Musterhaus komplex, Musterweg 7, Zürich");
+    expect(long.lines.every((l) => !l.includes("…"))).toBe(true);
+    expect(long.scale).toBeLessThan(1);
   });
 });

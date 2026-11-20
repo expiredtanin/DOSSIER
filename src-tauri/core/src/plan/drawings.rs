@@ -66,9 +66,6 @@ pub fn symbol_factor_at(p: &Project, level: &str, scale: f64) -> f64 {
     scale / 100.0
 }
 
-/// Rand um die Achsen im Ausmass, damit die Blasen ins Bild passen (Meter).
-const GRID_BUBBLE_MARGIN_M: f64 = 1.0;
-
 // Massstabsbalken, Papier-mm.
 const SCALEBAR_HEIGHT_MM: f64 = 1.5;
 const SCALEBAR_TICK_MM: f64 = 1.0;
@@ -1807,6 +1804,22 @@ pub fn scale_geom(g: &Drawing2DGeom, f: &dyn Fn(Vec2) -> Vec2, k: f64) -> Drawin
     out
 }
 
+/// [324] Ausmass einer Zeichnung des Plans: wie [`acc_bounds`], bei Ketten der automatischen Aussenbemassung samt dem Versatz,
+/// den das Ausweichen beim Zeichnen ergibt ([`autodim_layout`]) — sonst steht die äusserste Kette ausserhalb des Rahmens.
+fn acc_drawing_bounds(c: &Ctx, d: &Drawing2D, b: &mut Bounds) {
+    if let Drawing2DGeom::Dimension { offset, arc_center: None, kind: None, .. } = &d.geom {
+        let shift = autodim_layout(c, d, c.a.scale).shift;
+        if shift != 0.0 && shift.is_finite() {
+            let mut g = d.geom.clone();
+            if let Drawing2DGeom::Dimension { offset: o, .. } = &mut g {
+                *o = *offset + shift;
+            }
+            return acc_bounds(&g, b, c.a.scale);
+        }
+    }
+    acc_bounds(&d.geom, b, c.a.scale);
+}
+
 /// Ausmass einer Zeichnung für „Einpassen"/Druck (`computeBounds` in TS).
 fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds, scale: f64) {
     use Drawing2DGeom as G;
@@ -1853,7 +1866,16 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds, scale: f64) {
         G::Bezier { pts } | G::Spline { pts, .. } => pts.iter().for_each(acc),
         G::Dimension { pts, offset, .. } => {
             pts.iter().for_each(&mut acc);
-            let reach = offset * 1.4;
+            // [324] Zahlen stehen ausserhalb der Kette: Versatz plus Schrifthöhe samt Luft (Papier-mm), mindestens wie bisher 1.4×;
+            // an den Kettenenden Platz für breite Zahlen über kurzen Abschnitten.
+            let reach = (offset * 1.4).abs().max(offset.abs() + mm_to_model(5.0, scale)) * if *offset < 0.0 { -1.0 } else { 1.0 };
+            let ext = mm_to_model(4.0, scale);
+            if let (Some(f), Some(l)) = (pts.first(), pts.last()) {
+                for q in [f, l] {
+                    acc(&v(q.x - ext, q.y - ext));
+                    acc(&v(q.x + ext, q.y + ext));
+                }
+            }
             for i in 0..pts.len().saturating_sub(1) {
                 let (a, bb) = (pts[i], pts[i + 1]);
                 let len = hypot2(bb.x - a.x, bb.y - a.y);
@@ -1885,20 +1907,22 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds, scale: f64) {
                 acc(&v(at.x + uy * below, at.y - ux * below));
             }
         }
-        G::Grid { .. } => {
+        G::Grid { bubble_mm, .. } => {
+            // [324] Rand für die Blasen in Papier-Grösse (Durchmesser × 1.5 für das Ausweichen vor Massketten), nicht fix 1 m.
+            let margin = crate::grid::bubble_diameter(*bubble_mm, scale) * 1.5;
             if let Some(spec) = crate::grid::Spec::of(g) {
                 for ax in spec.axes() {
                     match ax.shape {
                         // Rand für die Blasen an den Enden (Durchmesser bis ≈ 1 m bei 1:100).
                         crate::grid::Shape::Line { a, b: e } => {
-                            acc(&v(a.0 - GRID_BUBBLE_MARGIN_M, a.1 - GRID_BUBBLE_MARGIN_M));
-                            acc(&v(e.0 + GRID_BUBBLE_MARGIN_M, e.1 + GRID_BUBBLE_MARGIN_M));
-                            acc(&v(a.0 + GRID_BUBBLE_MARGIN_M, a.1 + GRID_BUBBLE_MARGIN_M));
-                            acc(&v(e.0 - GRID_BUBBLE_MARGIN_M, e.1 - GRID_BUBBLE_MARGIN_M));
+                            acc(&v(a.0 - margin, a.1 - margin));
+                            acc(&v(e.0 + margin, e.1 + margin));
+                            acc(&v(a.0 + margin, a.1 + margin));
+                            acc(&v(e.0 - margin, e.1 - margin));
                         }
                         crate::grid::Shape::Arc { c, r, .. } => {
-                            acc(&v(c.0 - r - GRID_BUBBLE_MARGIN_M, c.1 - r - GRID_BUBBLE_MARGIN_M));
-                            acc(&v(c.0 + r + GRID_BUBBLE_MARGIN_M, c.1 + r + GRID_BUBBLE_MARGIN_M));
+                            acc(&v(c.0 - r - margin, c.1 - r - margin));
+                            acc(&v(c.0 + r + margin, c.1 + r + margin));
                         }
                     }
                 }
@@ -2190,12 +2214,12 @@ pub fn plan_drawings(c: &Ctx, sink: &mut Sink, bounds: &mut Bounds) -> Result<()
         }
         if super::situation::drawing_is_filled(c, d) {
             // [207] Die gefüllte Fläche (situation.rs) trägt den Umriss.
-            acc_bounds(&d.geom, bounds, c.a.scale);
+            acc_drawing_bounds(c, d, bounds);
             continue;
         }
         sink.keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
         emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, m.greyed, c.a.scale, sink, 0)?;
-        acc_bounds(&d.geom, bounds, c.a.scale);
+        acc_drawing_bounds(c, d, bounds);
     }
     sink.keep = Keep::All;
     Ok(())
@@ -2216,7 +2240,7 @@ pub(super) fn near_drawing_bounds(c: &Ctx) -> Bounds {
         if is_far_class(&d.category_code) || !on_floor(c, d) || !memo.get(c, d).shown {
             continue;
         }
-        acc_bounds(&d.geom, &mut b, c.a.scale);
+        acc_drawing_bounds(c, d, &mut b);
     }
     b
 }
@@ -2494,7 +2518,7 @@ pub fn plan_drawings_chunked(c: &Ctx, stamps: &[u64], cache: &mut super::cache::
             continue;
         }
         if super::situation::drawing_is_filled(c, d) {
-            acc_bounds(&d.geom, bounds, c.a.scale);
+            acc_drawing_bounds(c, d, bounds);
             continue;
         }
         let keep = if c.a.compact && compact_eligible(d) { Keep::NoLines } else { Keep::All };
@@ -2615,7 +2639,7 @@ fn build_chunk<'a>(
         emit(c, d, Attrs::with(d, &m.ov, m.cat), &d.geom, flags & 1 != 0, c.a.scale, &mut sink, 0)?;
         *next_ref = sink.next_ref;
         let mut b = Bounds::new();
-        acc_bounds(&d.geom, &mut b, c.a.scale);
+        acc_drawing_bounds(c, d, &mut b);
         bounds.merge(b.raw());
         w.part_end(stamp, flags, b.raw());
     }
@@ -2802,6 +2826,23 @@ pub fn level_markers(p: &Project, b: [f64; 4], scale: f64) -> Vec<Primitive> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [324] Ausmass: Masszahlen (Schrifthöhe über der Kette) und Achsblasen (Papier-Durchmesser) zählen mit, auch bei 1:200.
+    #[test]
+    fn bounds_zaehlen_masszahlen_und_blasen() {
+        let dim: Drawing2DGeom = serde_json::from_value(serde_json::json!({"shape": "dimension", "pts": [{"x": 0.0, "y": 0.0}, {"x": 4.0, "y": 0.0}], "offset": 2.0})).unwrap();
+        let mut b = Bounds::new();
+        acc_bounds(&dim, &mut b, 200.0);
+        let r = b.get().unwrap();
+        // Kette bei y = 2.0 (Versatz) plus mindestens 5 mm Papier (1 m bei 1:200) für die Zahl.
+        assert!(r[3] >= 2.0 + mm_to_model(5.0, 200.0) - 1e-9, "{r:?}");
+        let grid: Drawing2DGeom = serde_json::from_value(serde_json::json!({"shape": "grid", "origin": {"x": 0.0, "y": 0.0}, "angle": 0.0, "a": [{"label": "1", "pos": 0.0}, {"label": "2", "pos": 5.0}], "b": [{"label": "A", "pos": 0.0}, {"label": "B", "pos": 4.0}]})).unwrap();
+        let mut g = Bounds::new();
+        acc_bounds(&grid, &mut g, 200.0);
+        let r = g.get().unwrap();
+        let d = crate::grid::bubble_diameter(None, 200.0);
+        assert!(r[3] >= 4.0 + d - 1e-9 && r[0] <= -d + 1e-9, "{r:?} d={d}");
+    }
     use crate::plan::domains::PlanArgs;
 
     pub(crate) fn args(scale: f64) -> PlanArgs {

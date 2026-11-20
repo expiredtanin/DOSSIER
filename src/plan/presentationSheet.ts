@@ -37,8 +37,6 @@ import { generateAxoPlan } from "./toAxo";
 export const PRESENTATION_TEMPLATE_ID = "std-vt-praesentation";
 /** Rand zwischen Inhalt und Rahmen (mm, wie `FRAME_PAD_MM` im Kern). */
 const FRAME_PAD_MM = 4;
-/** [323] Rand im Präsentationsplan ohne Plakat (`SHEET_PAD_MM` im Kern). */
-const SHEET_PAD_MM = 8;
 
 export interface PresentationOptions {
   /** Geschosse (Ebenen der Art `floor`) in Blattreihenfolge. */
@@ -663,7 +661,7 @@ export function presentationSheetOps(
     drawings.push(
       tpl
         ? sheetText(`d-pres-${stamp}-t${i}`, sheetLevels[page].id, cat, it.xMm + labelM.sizeMm * 3.6, it.yMm + it.heightMm + labelM.dyMm, title, labelM.sizeMm, true)
-        : sheetText(`d-pres-${stamp}-t${i}`, sheetLevels[page].id, cat, it.xMm + SHEET_PAD_MM, it.yMm + it.heightMm + 6, `${title}   1:${it.scale}`, 4, true),
+        : sheetText(`d-pres-${stamp}-t${i}`, sheetLevels[page].id, cat, it.xMm + FRAME_PAD_MM, it.yMm + it.heightMm + 6, `${title}   1:${it.scale}`, 4, true),
     );
   });
   // Nordpfeil rechts neben dem Titel des ersten Grundrisses, Massstabsbalken links davon, sofern er den Titel nicht berührt
@@ -674,7 +672,7 @@ export function presentationSheetOps(
     const lvl = sheetLevels[it.page ?? 0].id;
     const titleEnd = tpl
       ? it.xMm + labelM.sizeMm * 3.6 + title.length * labelM.sizeMm * 0.65
-      : it.xMm + SHEET_PAD_MM + (title.length + 8) * 4 * 0.65;
+      : it.xMm + FRAME_PAD_MM + (title.length + 8) * 4 * 0.65;
     const cx = it.xMm + it.widthMm - 8;
     const beside = cx - 8 > titleEnd;
     const cy = beside ? it.yMm + it.heightMm + 4.8 : it.yMm + 8;

@@ -15,9 +15,8 @@ use std::collections::BTreeMap;
 pub const SCALES: [f64; 5] = [50.0, 100.0, 200.0, 500.0, 1000.0];
 /// Rand zwischen Inhalt und Viewport-Rahmen (mm).
 pub const FRAME_PAD_MM: f64 = 4.0;
-/// [323] Rand im Präsentationsplan (kein Plakat): Achskreise und Masszahlen der Aussenbemassung stehen über dem Ausmass der
-/// Ansicht hinaus (Plan-Grenzen zählen nur ihre Ankerpunkte); bei 4 mm schnitt der Rahmen sie oben ab (Komplex-Erdgeschoss).
-pub const SHEET_PAD_MM: f64 = 8.0;
+/// [324] Mehr Abstand zwischen den Reihen höchstens (mm), wenn das Blatt Platz übrig hat: darüber hinaus bleibt der Block mittig.
+pub const MAX_ROW_SPREAD_MM: f64 = 40.0;
 /// Abstand zwischen Rahmen (mm).
 pub const GAP_MM: f64 = 12.0;
 /// Platz für den Titel unter jedem Rahmen (mm).
@@ -69,7 +68,7 @@ impl Sheet {
 }
 
 /// Zeilen ab `y0` füllen; `strict`: `None`, wenn eine Zeile oder der Block nicht aufs Blatt passt.
-fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) -> Option<(Vec<Rect>, f64)> {
+fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool, spread: f64) -> Option<(Vec<Rect>, f64)> {
     let (l, r, b) = (sheet.margin, sheet.w - sheet.margin, sheet.h - sheet.margin);
     let mut out = vec![Rect::default(); items.len()];
     let mut y = y0;
@@ -77,8 +76,8 @@ fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) ->
     while i < items.len() {
         let g = items[i].0;
         let j = i + items[i..].iter().take_while(|it| it.0 == g).count();
-        let cw = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.1)) + 2.0 * SHEET_PAD_MM;
-        let ch = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.2)) + 2.0 * SHEET_PAD_MM;
+        let cw = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.1)) + 2.0 * FRAME_PAD_MM;
+        let ch = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.2)) + 2.0 * FRAME_PAD_MM;
         let mut k = i;
         while k < j {
             let row_bottom = y + ch + TITLE_MM;
@@ -95,11 +94,11 @@ fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) ->
                 out[k + c] = Rect { x_mm: x0 + c as f64 * (cw + GAP_MM), y_mm: y, width_mm: cw, height_mm: ch };
             }
             k += cnt;
-            y = row_bottom + GAP_MM;
+            y = row_bottom + GAP_MM + spread;
         }
         i = j;
     }
-    let bottom = y - GAP_MM;
+    let bottom = y - GAP_MM - spread;
     if strict && bottom > b + 1e-9 {
         return None;
     }
@@ -107,18 +106,43 @@ fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) ->
 }
 
 /// Rahmen für Inhalte `(Gruppe, Breite, Höhe)` (Papier-mm, Gruppen aufsteigend sortiert) in Eingabe-
-/// reihenfolge; `None`, wenn sie nicht aufs Blatt passen. Der Block wird senkrecht zentriert, wenn das
-/// die Zeilen nicht verändert.
+/// reihenfolge; `None`, wenn sie nicht aufs Blatt passen. [324] Bleibt Platz, werden die Reihen senkrecht
+/// gleichmässig über die nutzbare Fläche verteilt (grösserer Abstand, höchstens [`MAX_ROW_SPREAD_MM`]); der Rest
+/// zentriert den Block. Das Schriftfeld bleibt in jedem Fall frei (der Abstand wächst nur, solange alles passt).
 pub fn pack(items: &[(u32, f64, f64)], sheet: &Sheet) -> Option<Vec<Rect>> {
     let (top, b) = (sheet.top, sheet.h - sheet.margin);
-    let (first, bottom) = pack_from(items, sheet, top, true)?;
-    let off = (b - bottom) / 2.0;
+    let (first, bottom) = pack_from(items, sheet, top, true, 0.0)?;
+    let rows = {
+        let mut ys: Vec<i64> = first.iter().map(|r| (r.y_mm * 1000.0).round() as i64).collect();
+        ys.dedup();
+        ys.len()
+    };
+    // Grösster Zusatzabstand, bei dem es noch passt (Schriftfeld-Zeilen werden mit wachsendem Abstand ggf. schmaler).
+    let mut spread = 0.0;
+    if rows > 1 {
+        let (mut lo, mut hi) = (0.0_f64, ((b - bottom) / (rows as f64 - 1.0)).min(MAX_ROW_SPREAD_MM));
+        if pack_from(items, sheet, top, true, hi).is_some() {
+            lo = hi;
+        } else {
+            for _ in 0..24 {
+                let mid = (lo + hi) / 2.0;
+                if pack_from(items, sheet, top, true, mid).is_some() {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+        }
+        spread = lo;
+    }
+    let (spread_rects, spread_bottom) = pack_from(items, sheet, top, true, spread)?;
+    let off = (b - spread_bottom) / 2.0;
     if off > 0.0 {
-        if let Some((centered, _)) = pack_from(items, sheet, top + off, true) {
+        if let Some((centered, _)) = pack_from(items, sheet, top + off, true, spread) {
             return Some(centered);
         }
     }
-    Some(first)
+    Some(spread_rects)
 }
 
 /// Ergebnis der Wahl: Massstab, ob alles passt, Rahmen je Inhalt.
@@ -138,7 +162,7 @@ pub fn choose(mut sizes_at: impl FnMut(f64) -> Vec<(u32, f64, f64)>, sheet: &She
         }
     }
     let s = SCALES[SCALES.len() - 1];
-    let rects = pack_from(&sizes_at(s), sheet, sheet.top, false).map(|r| r.0).unwrap_or_default();
+    let rects = pack_from(&sizes_at(s), sheet, sheet.top, false, 0.0).map(|r| r.0).unwrap_or_default();
     Choice { scale: s, fits: false, rects }
 }
 
@@ -148,7 +172,7 @@ pub fn choose_fixed(mut sizes_at: impl FnMut(f64) -> Vec<(u32, f64, f64)>, sheet
     if let Some(rects) = pack(&sizes, sheet) {
         return Choice { scale: s, fits: true, rects };
     }
-    let rects = pack_from(&sizes, sheet, sheet.top, false).map(|r| r.0).unwrap_or_default();
+    let rects = pack_from(&sizes, sheet, sheet.top, false, 0.0).map(|r| r.0).unwrap_or_default();
     Choice { scale: s, fits: false, rects }
 }
 
@@ -610,6 +634,24 @@ mod tests {
     }
 
     /// Grosser Bau auf A3: 1:100 passt nicht, 1:200 auch nicht, 1:500 schon (Rand 8 mm je Seite, [323]).
+    /// [324] Bleibt Platz, verteilen sich die Reihen über die nutzbare Fläche (Viewports ≥ 70 % der Blatthöhe), das Schriftfeld
+    /// bleibt frei und nichts überlappt.
+    #[test]
+    fn reihen_fuellen_das_blatt_senkrecht() {
+        let s = Sheet::new(841.0, 594.0, true);
+        // Wie das Komplex-Beispiel bei 1:200: 4 Grundrisse, 4 Ansichten, 2 Schnitte; Rahmen klein gegen das Blatt.
+        let items: Vec<(u32, f64, f64)> = (0..4).map(|_| (0, 180.0, 140.0)).chain((0..4).map(|_| (1, 180.0, 70.0))).chain((0..2).map(|_| (2, 180.0, 70.0))).collect();
+        let r = pack(&items, &s).expect("passt");
+        check(&r, &s);
+        let top = r.iter().fold(f64::MAX, |m, f| m.min(f.y_mm));
+        let bottom = r.iter().fold(0.0_f64, |m, f| m.max(f.y_mm + f.height_mm));
+        assert!((bottom - top) / s.h >= 0.7, "Blatthöhe genutzt: {}", (bottom - top) / s.h);
+        // Reihen mit gleichmässigem Abstand.
+        let mut ys: Vec<f64> = r.iter().map(|f| f.y_mm).collect();
+        ys.dedup_by(|a, b| (*a - *b).abs() < 1e-6);
+        assert_eq!(ys.len(), 3);
+    }
+
     #[test]
     fn kleines_blatt_waehlt_kleineren_massstab() {
         let s = Sheet::new(420.0, 297.0, true);

@@ -578,3 +578,20 @@ export function visibleCodesFromSnapshot(snap: ViewSnapshot): Set<string> {
   }
   return out;
 }
+
+/**
+ * [324] Projektname im Schriftfeld (Kopfzeile 8 mm, Platz neben der Plan-Nr. für ≈ 28 Zeichen): zu lang ⇒ zwei Zeilen
+ * in kleinerer Schrift (`scale` × Normalgrösse, Grundlinien in `baselines`, mm ab Oberkante des Felds) statt Kürzen;
+ * nur was auch in zwei Zeilen nicht passt, endet mit „…".
+ */
+export function titleBlockNameLines(name: string, max = 28): { lines: string[]; scale: number; baselines: number[] } {
+  const s = name.trim();
+  if (s.length <= max) return { lines: [s], scale: 1, baselines: [5.6] };
+  const per = Math.floor(max * 1.25);
+  let cut = s.lastIndexOf(" ", per);
+  if (cut < per * 0.4) cut = per;
+  const first = s.slice(0, cut).trim();
+  let rest = s.slice(cut).trim();
+  if (rest.length > per) rest = rest.slice(0, per - 1) + "…";
+  return { lines: [first, rest], scale: 0.8, baselines: [3.4, 6.8] };
+}

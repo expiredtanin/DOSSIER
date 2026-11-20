@@ -5,7 +5,7 @@
 
 import type { Layout, MasterLayout, Project } from "../model/types";
 import { t } from "../i18n/translate";
-import { effectiveSheetSizeMm, findMaster, resolveTitleBlock, type ResolvedTitleBlock } from "../model/layoutModel";
+import { effectiveSheetSizeMm, findMaster, resolveTitleBlock, titleBlockNameLines, type ResolvedTitleBlock } from "../model/layoutModel";
 import { imageGeometry } from "../model/layoutImages";
 import { posterHeaderItems, viewportScaleLabel, viewportVariantLabel } from "../model/posterTemplates";
 import { legendPlan, legendPrintSvg } from "./legendSvg";
@@ -53,11 +53,12 @@ function titleBlockSvg(w: number, h: number, tb: ResolvedTitleBlock, layout: Lay
   const x = w - bw - 6;
   const y = h - bh - 6;
   const fmt = `${layout.paper.toUpperCase()} ${layout.orientation === "landscape" ? "quer" : "hoch"}`;
+  const name = titleBlockNameLines(tb.projectName);
   const o: string[] = [
     `<rect x="${x}" y="${y}" width="${bw}" height="${bh}" fill="#fff" stroke="${INK}" stroke-width="0.35"/>`,
     `<line x1="${x}" y1="${y + 8}" x2="${x + bw}" y2="${y + 8}" stroke="${INK}" stroke-width="0.2"/>`,
     `<line x1="${x}" y1="${y + bh - 7}" x2="${x + bw}" y2="${y + bh - 7}" stroke="${INK}" stroke-width="0.2"/>`,
-    textEl(x + 3, y + 5.6, clip(tb.projectName, 28), 3.2, { bold: true }),
+    ...name.lines.map((l, i) => textEl(x + 3, y + name.baselines[i], l, 3.2 * name.scale, { bold: true })),
     textEl(x + bw - 3, y + 5.6, tb.planNumber, 3.2, { bold: true, anchor: "end" }),
     textEl(x + 3, y + 13, clip(tb.sheetName, 36), 2.8),
   ];

@@ -33,6 +33,7 @@ import {
   findSnapshot,
   folderPdfPages,
   resolveTitleBlock,
+  titleBlockNameLines,
   resolveViewportScale,
   SHEET_SCALE_DENOMINATOR,
   viewportCenterBounds,
@@ -72,8 +73,10 @@ function drawTitleBlock(
 
   doc.setTextColor(17, 17, 17);
   setPdfFont(doc, PDF_DEFAULT_FONT, true);
+  const name = titleBlockNameLines(tb.projectName);
+  doc.setFontSize(9 * name.scale);
+  name.lines.forEach((l, i) => doc.text(l, x + 3, y + name.baselines[i]));
   doc.setFontSize(9);
-  doc.text(clip(tb.projectName, 28), x + 3, y + 5.6);
   doc.text(tb.planNumber, x + boxW - 3, y + 5.6, { align: "right" });
 
   setPdfFont(doc, PDF_DEFAULT_FONT);

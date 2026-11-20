@@ -35,8 +35,8 @@ describe("[66] Präsentationsplan", () => {
     project = st().project;
   });
 
-  // [323] Achskreise und Masszahlen der Aussenbemassung ragen über das Plan-Ausmass hinaus: der Rahmen lässt 8 mm Rand, nicht 4.
-  it("[323] Präsentationsplan: Rahmen der Grundrisse mit 8 mm Rand um das gemeinsame Ausmass", () => {
+  // [324] Achskreise und Masszahlen zählen im Plan-Ausmass mit (Kern `acc_bounds`): der Rahmen lässt nur 4 mm Rand.
+  it("[324] Präsentationsplan: Rahmen der Grundrisse mit 4 mm Rand um das Ausmass samt Achskreisen", () => {
     const o = { ...presentationDefaults(project), scale: 200 };
     const plan = planPresentationSheet(project, o);
     const res = presentationSheetOps(project, o, LABELS, "p323")!;
@@ -52,8 +52,20 @@ describe("[66] Präsentationsplan", () => {
       w = Math.max(w, ((b.maxX - b.minX) * 1000) / 200);
     }
     const eg = plan.items.find((i) => q.drawingLevels.find((l) => l.id === i.levelId)?.kind === "floor")!;
-    expect(eg.heightMm).toBeGreaterThanOrEqual(h + 16 - 1e-6);
-    expect(eg.widthMm).toBeGreaterThanOrEqual(w + 16 - 1e-6);
+    expect(eg.heightMm).toBeGreaterThanOrEqual(h + 8 - 1e-6);
+    expect(eg.widthMm).toBeGreaterThanOrEqual(w + 8 - 1e-6);
+  });
+
+  it("[324] Blatt gefüllt: Viewports belegen ≥ 70 % der Blatthöhe, Schriftfeld bleibt frei", () => {
+    const o = { ...presentationDefaults(project), scale: 200 };
+    const plan = planPresentationSheet(project, o);
+    expect(plan.fits).toBe(true);
+    const top = Math.min(...plan.items.map((i) => i.yMm));
+    const bottom = Math.max(...plan.items.map((i) => i.yMm + i.heightMm));
+    const { h, w } = sheetSizeMm("a1", "landscape");
+    expect((bottom - top) / h).toBeGreaterThanOrEqual(0.7);
+    const tb = { xMm: w - 76, yMm: h - 36, widthMm: 70, heightMm: 30 };
+    expect(plan.items.some((i) => overlaps(i, tb))).toBe(false);
   });
 
   it("Vorschlag: alle Geschosse, Ansichten, ein Schnitt, A1 quer (Master)", () => {
@@ -522,10 +534,11 @@ describe("[66] Präsentationsplan", () => {
   }, 90_000);
 
   // [282] Passt der Plan im gewählten Massstab nicht: kein überlaufendes Blatt, sondern der grösste passende Massstab als Vorschlag.
-  it("[282] Massstab-Vorschlag: 1:50 auf A4 passt nicht, vorgeschlagener Massstab passt", () => {
+  // [324] A3 statt A4: das Ausmass zählt Achskreise und Masszahlen in Papier-Grösse mit, auf A4 hochkant passt der Wettbewerb auch bei 1:1000 nicht mehr.
+  it("[282] Massstab-Vorschlag: 1:50 auf A3 passt nicht, vorgeschlagener Massstab passt", () => {
     st().loadProject(buildWettbewerbSampleProject());
     const p = st().project;
-    const o = { ...presentationDefaults(p), paper: "a4" as const, orientation: "portrait" as const, scale: 50 };
+    const o = { ...presentationDefaults(p), paper: "a3" as const, orientation: "portrait" as const, scale: 50 };
     expect(planPresentationSheet(p, o).fits).toBe(false);
     const s = fittingPresentationScale(p, o);
     expect(s).not.toBeNull();

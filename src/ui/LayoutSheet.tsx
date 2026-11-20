@@ -53,6 +53,7 @@ import {
   findMaster,
   findSnapshot,
   resolveTitleBlock,
+  titleBlockNameLines,
   resolveViewportScale,
   sheetMmToModel,
   sheetModelToMm,
@@ -196,14 +197,17 @@ export function TitleBlockSvg({
   const x = sheet.w - boxW - pad;
   const y = sheet.h - boxH - pad;
   const fmt = `${paper.toUpperCase()} ${orientation === "landscape" ? "quer" : "hoch"}`;
+  const name = titleBlockNameLines(tb.projectName);
   return (
     <g>
       <rect x={x} y={y} width={boxW} height={boxH} fill="#ffffff" stroke="#111111" strokeWidth={0.35} />
       <line x1={x} y1={y + 8} x2={x + boxW} y2={y + 8} stroke="#111111" strokeWidth={0.2} />
       <line x1={x} y1={y + boxH - 7} x2={x + boxW} y2={y + boxH - 7} stroke="#111111" strokeWidth={0.2} />
-      <text x={x + 3} y={y + 5.6} fontSize={3.4} fontFamily="Helvetica, Arial, sans-serif" fontWeight="bold" fill="#111111">
-        {clip(tb.projectName, 28)}
-      </text>
+      {name.lines.map((l, i) => (
+        <text key={i} x={x + 3} y={y + name.baselines[i]} fontSize={3.4 * name.scale} fontFamily="Helvetica, Arial, sans-serif" fontWeight="bold" fill="#111111">
+          {l}
+        </text>
+      ))}
       <text x={x + boxW - 3} y={y + 5.6} fontSize={3.4} fontFamily="Helvetica, Arial, sans-serif" fontWeight="bold" fill="#111111" textAnchor="end">
         {tb.planNumber}
       </text>
