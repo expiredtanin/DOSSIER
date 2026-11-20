@@ -125,6 +125,50 @@ fn clip_half(poly: &[[f64; 2]], h: [f64; 3]) -> Vec<[f64; 2]> {
     out
 }
 
+/// Haarfeiner Rest (Rundung am Rand eines Verdeckers): fast ohne Fläche oder schmaler als 1 µm (mittlere Breite
+/// `2·Fläche/Umfang`), [320].
+fn hairline(r: &[[f64; 2]]) -> bool {
+    let n = r.len();
+    let (mut a, mut per) = (0.0, 0.0);
+    for i in 0..n {
+        let (p, q) = (r[i], r[(i + 1) % n]);
+        a += p[0] * q[1] - q[0] * p[1];
+        let (dx, dy) = (q[0] - p[0], q[1] - p[1]);
+        per += (dx * dx + dy * dy).sqrt();
+    }
+    let a = a.abs() / 2.0;
+    !(a > 1e-10) || 2.0 * a < 1e-6 * per
+}
+
+/// [320] Verdecker-Stücke weglassen, die ganz in einem grösseren konvexen Stück liegen (Ecken innen oder auf dem
+/// Rand): Sie ändern die Vereinigung nicht, bringen aber fast deckungsgleiche schräge Kanten in den Boolean
+/// (Dachflächen hinter Giebelwänden, Stufen hinter einer Wand), an denen i_overlay in Tausende Splitter zerfällt
+/// und Sekunden braucht. Grösste zuerst; ein Stück wird nur an einem behaltenen gemessen.
+fn drop_covered(clips: &mut Vec<Polygon>) {
+    if clips.len() < 2 {
+        return;
+    }
+    let tol = 1e-9;
+    let ring_area = |r: &[[f64; 2]]| r.iter().zip(r.iter().cycle().skip(1)).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs() / 2.0;
+    let bbox = |r: &[[f64; 2]]| r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
+    let mut items: Vec<(f64, [f64; 4], bool, Polygon)> = clips.drain(..).map(|p| (ring_area(&p[0]), bbox(&p[0]), is_convex(&p[0]), p)).collect();
+    // Absteigend nach Fläche, bei Gleichstand stabil: ein Stück liegt nie in einem späteren.
+    items.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let mut kept: Vec<usize> = Vec::with_capacity(items.len());
+    for k in 0..items.len() {
+        let (_, bk, _, pk) = &items[k];
+        let covered = kept.iter().any(|&j| {
+            let (_, bj, cj, pj) = &items[j];
+            *cj && bj[0] <= bk[0] + tol && bj[1] <= bk[1] + tol && bj[2] >= bk[2] - tol && bj[3] >= bk[3] - tol && pk[0].iter().all(|q| inside_closed(*q, &pj[0], tol))
+        });
+        if !covered {
+            kept.push(k);
+        }
+    }
+    let mut take: Vec<Option<Polygon>> = items.into_iter().map(|i| Some(i.3)).collect();
+    clips.extend(kept.into_iter().filter_map(|k| take[k].take()));
+}
+
 /// Ebene `d = c0 + cu·u + cv·v` der Fläche (`[c0, cu, cv]`); `None` auf der Kante oder bei Unsinn.
 pub fn plane(pts: &[V3]) -> Option<[f64; 3]> {
     prepare(pts)?.plane
@@ -216,11 +260,12 @@ pub fn visible_regions(faces: &[Vec<V3>], eps: f64) -> Vec<Option<Vec<Polygon>>>
         if hidden {
             out[fi] = Some(Vec::new());
         } else if !clips.is_empty() {
+            drop_covered(&mut clips);
             let rest = crate::polygon_bool::difference(&[vec![f.poly.clone()]], &clips);
             // Haarfeine Reste (Rundung am Rand des Verdeckers) entfallen.
             let area = |r: &Vec<[f64; 2]>| r.iter().zip(r.iter().cycle().skip(1)).map(|(a, b)| a[0] * b[1] - b[0] * a[1]).sum::<f64>().abs() / 2.0;
             let whole = area(&f.poly);
-            let rest: Vec<Polygon> = rest.into_iter().filter(|p| p.first().is_some_and(|r| area(r) > 1e-10)).collect();
+            let rest: Vec<Polygon> = rest.into_iter().filter(|p| p.first().is_some_and(|r| !hairline(r))).collect();
             // Nichts weggeschnitten (Verdecker nur am Rand): Umriss unverändert lassen.
             let kept: f64 = rest.iter().map(|p| p.iter().enumerate().map(|(k, r)| if k == 0 { area(r) } else { -area(r) }).sum::<f64>()).sum();
             if !(rest.len() == 1 && rest[0].len() == 1 && (kept - whole).abs() <= 1e-9 * whole.max(1.0)) {
@@ -337,6 +382,35 @@ mod tests {
             let cx = v[0][0].iter().map(|q| q[0]).sum::<f64>() / v[0][0].len() as f64;
             assert!(if k == 0 { cx < 1.0 } else { cx > 1.0 }, "{k}: {v:?}");
         }
+    }
+
+    #[test]
+    fn verdecker_in_verdecker_ohne_splitter_falle() {
+        // [320] Fläche 296 der Ansicht Ost (Musterhaus komplex): 62 Verdecker-Stücke, viele davon in einem grösseren
+        // (Stufen, Giebel mit fast gleicher Dachneigung). Vorher 2.3 s nativ (i_overlay: 2001 Splitter), jetzt ms.
+        let v: serde_json::Value = serde_json::from_str(include_str!("../tests/fixtures/hlr_fill_320.json")).unwrap();
+        let face: Vec<[f64; 2]> = serde_json::from_value(v["face"].clone()).unwrap();
+        let mut clips: Vec<Polygon> = serde_json::from_value(v["clips"].clone()).unwrap();
+        let t = std::time::Instant::now();
+        drop_covered(&mut clips);
+        let rest = crate::polygon_bool::difference(&[vec![face]], &clips);
+        assert!(t.elapsed().as_secs_f64() < 2.0, "{:?}", t.elapsed());
+        assert!(clips.len() < 20, "{}", clips.len());
+        // Wie ohne Vorfilter: ein sichtbares Stück von 0.24 m² (übrige Teile Rundungssplitter).
+        let big: Vec<&Polygon> = rest.iter().filter(|p| area(std::slice::from_ref(*p)) > 1e-8).collect();
+        assert_eq!(big.len(), 1);
+        assert!((area(&rest) - 0.24).abs() < 1e-7, "{}", area(&rest));
+    }
+
+    #[test]
+    fn verdecker_im_verdecker_entfaellt() {
+        let mut c: Vec<Polygon> = vec![vec![vec![[1.0, 1.0], [2.0, 1.0], [2.0, 2.0]]], vec![vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]], vec![vec![[3.0, 3.0], [5.0, 3.0], [5.0, 5.0]]], vec![vec![[0.0, 0.0], [4.0, 0.0], [4.0, 4.0], [0.0, 4.0]]]];
+        drop_covered(&mut c);
+        // Das Dreieck innen und das doppelte Quadrat entfallen, das überstehende Dreieck bleibt.
+        assert_eq!(c.len(), 2, "{c:?}");
+        // Haarfein: 2 m × 0.5 µm ja, 2 m × 1 mm nein.
+        assert!(hairline(&[[0.0, 0.0], [2.0, 0.0], [2.0, 5e-7], [0.0, 5e-7]]));
+        assert!(!hairline(&[[0.0, 0.0], [2.0, 0.0], [2.0, 1e-3], [0.0, 1e-3]]));
     }
 
     #[test]
