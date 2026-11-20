@@ -6,4 +6,4 @@ polygon 30
 polyline 4
 rect 1
 svg 1
-hash a9cbbbae2c865eb3
+hash 3e1e04fdfe4f2df2

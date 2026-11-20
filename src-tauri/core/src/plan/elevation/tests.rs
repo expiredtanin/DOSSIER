@@ -314,7 +314,9 @@ fn buendige_deckenstirn_hinter_bogenwand() {
     }).collect();
     assert!(inner.is_empty(), "Schichtband-Stücke: {inner:?}");
     let shadow: Vec<&Vec<Vec2>> = prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, pts, .. } if fill == SHADOW_FILL => Some(pts), _ => None }).collect();
-    assert!(shadow.is_empty(), "Schatten einer bündigen Stirn: {shadow:?}");
+    // [316] Die bündige Stirn wirft keinen Schatten; im Schatten liegen nur die rechten Facetten des Bogens, die
+    // sich von der Sonne (Zeichenregel: von links vorn) abwenden — ganz, über die volle Höhe.
+    assert!(!shadow.is_empty() && shadow.iter().all(|r| r.iter().all(|q| q.x > 5.5) && r.iter().any(|q| q.y.abs() < 1e-9) && r.iter().any(|q| (q.y - 2.6).abs() < 1e-9)), "Schatten einer bündigen Stirn: {shadow:?}");
 }
 
 /// [T2] Bogenwand in der Ansicht: keine Facetten-Fugen der Sehnen-Teilkörper, Umriss bleibt.
@@ -1329,4 +1331,106 @@ fn ansicht_haus_kraeftiger_als_nachbar() {
         .collect();
     assert!(!top.is_empty() && top.iter().all(|&w| w >= EDGE_MM + 0.1), "Oberkante des Hauses (Nachbar dahinter): {top:?}");
     assert!(neighbour.iter().all(|&w| w < EDGE_MM), "Nachbar: {neighbour:?}");
+}
+
+/// [316] Schlagschatten aus dem Sonnenstand der Schattenstudie (Beispielhaus, Ansicht Süd, Ansichts-x = Welt-x + 1).
+fn sun_view(when: Option<&str>, canopy: bool) -> Vec<Vec<Vec2>> {
+    let mut p = sample();
+    if let Some(w) = when {
+        p.sun_study = Some(SunStudy { when: w.into(), show: true, ..Default::default() });
+    }
+    if canopy {
+        // Vordach 1 m vor der Achse von W1 (Aussenfläche bei y −0.17), x 1.5 … 3.0, in der Geschossdecke des EG.
+        let mut ce = p.ceilings.as_ref().unwrap()[0].clone();
+        ce.id = "VD".into();
+        ce.outline = vec![Vec2 { x: 1.5, y: -1.0 }, Vec2 { x: 3.0, y: -1.0 }, Vec2 { x: 3.0, y: 0.0 }, Vec2 { x: 1.5, y: 0.0 }];
+        p.ceilings.as_mut().unwrap().push(ce);
+    }
+    let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+    let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+    let (prims, _) = elevation_primitives(&p, &level, true, false, &Visibility::default(), 100.0).unwrap().unwrap();
+    prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, pts, .. } if fill == SHADOW_FILL => Some(pts.clone()), _ => None }).collect()
+}
+
+fn in_shadow(shadow: &[Vec<Vec2>], u: f64, v: f64) -> bool {
+    shadow.iter().any(|r| {
+        let mut inside = false;
+        for i in 0..r.len() {
+            let (a, b) = (r[i], r[(i + 1) % r.len()]);
+            if (a.y > v) != (b.y > v) && u < a.x + (v - a.y) / (b.y - a.y) * (b.x - a.x) {
+                inside = !inside;
+            }
+        }
+        inside
+    })
+}
+
+#[test]
+fn vordach_wirft_bei_mittagssonne_schatten_senkrecht_nach_unten() {
+    // Sonnenmittag in Zürich am 21. Juni (Süd, ~66° hoch): unter dem Vordach (u 2.5 … 4.0) bis gut 1 m tiefer im
+    // Schatten, daneben und am Boden hell — kein Versatz zur Seite.
+    let s = sun_view(Some("2026-06-21T11:28:00Z"), true);
+    assert!(in_shadow(&s, 3.2, 2.1), "unter dem Vordach: {s:?}");
+    assert!(in_shadow(&s, 3.2, 1.2), "1 m unter dem Vordach");
+    assert!(!in_shadow(&s, 3.2, 0.2), "am Boden hell");
+    assert!(!in_shadow(&s, 5.6, 2.1), "neben dem Vordach hell");
+    assert!(!in_shadow(&s, 2.2, 2.1), "links daneben hell (Sonne von vorn, kein Versatz)");
+}
+
+#[test]
+fn abgewandte_fassade_ganz_im_eigenschatten() {
+    // Morgensonne aus Ost-Nordost (21. Juni, 05:30 UTC): die Südfassade liegt ganz im Schatten, auch ohne Werfer.
+    let s = sun_view(Some("2026-06-21T05:30:00Z"), false);
+    for (u, v) in [(1.1, 0.3), (3.2, 2.0), (5.8, 0.3), (5.8, 2.4)] {
+        assert!(in_shadow(&s, u, v), "({u}, {v}) besonnt: {s:?}");
+    }
+    // Nachmittag (Süd-West): besonnt, nur Schlagschatten.
+    let s = sun_view(Some("2026-06-21T13:30:00Z"), false);
+    assert!(!in_shadow(&s, 3.2, 0.3));
+}
+
+#[test]
+fn balkon_schatten_in_sonnenrichtung_versetzt() {
+    // Ohne Studie Zeichenregel (Licht von links vorn oben, 45°): Schatten um die Auskragung nach rechts versetzt —
+    // rechts neben dem Vordach im Schatten, links darunter hell.
+    let s = sun_view(None, true);
+    assert!(in_shadow(&s, 4.3, 1.9), "rechts versetzt: {s:?}");
+    assert!(!in_shadow(&s, 2.55, 1.9), "links unter dem Vordach hell");
+    // Vormittagssonne aus Südost (Licht läuft nach links, vom Betrachter aus): der Versatz kehrt sich um.
+    let s = sun_view(Some("2026-06-21T08:30:00Z"), true);
+    assert!(!in_shadow(&s, 3.9, 1.9) && in_shadow(&s, 2.35, 1.9), "{s:?}");
+}
+
+/// [316] Materialfuge: Wechsel des Fassadenmaterials zwischen übereinanderliegenden, bündigen Wänden (EG W1 verputzt,
+/// OG W5) gibt eine waagrechte Kante an der Grenze; gleiches Material über die Geschossgrenze bleibt ohne Linie.
+#[test]
+fn materialfuge_an_der_geschossgrenze() {
+    let seam = |p: &Project| -> Vec<(Vec2, Vec2)> {
+        let l = p.drawing_levels.iter().find(|l| l.id == "ansicht-sued").unwrap();
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let (prims, _) = elevation_primitives(p, &level, false, false, &Visibility::default(), 100.0).unwrap().unwrap();
+        // Waagrechte Linien auf Höhe der OG-Unterkante (2.6) innerhalb der Fassade (Ansichts-x 1 … 6).
+        prims.iter().filter_map(|q| match q {
+            Primitive::Line { a, b, cls, .. } if cls == "elevation-outline" && (a.y - 2.6).abs() < 1e-6 && (b.y - 2.6).abs() < 1e-6 && a.x.max(b.x) > 1.5 && a.x.min(b.x) < 5.5 => Some((*a, *b)),
+            _ => None,
+        }).collect()
+    };
+    let mut p = sample();
+    let og = p.walls.iter().find(|w| w.id == "W5").unwrap().clone();
+    let eg = p.walls.iter().find(|w| w.id == "W1").unwrap().clone();
+    assert_eq!(og.wall_type_id, eg.wall_type_id);
+    assert!(seam(&p).is_empty(), "gleiches Material: keine Fuge {:?}", seam(&p));
+    // OG mit Holzschalung aussen (eigener Wandtyp, äusserste Schicht anderer Baustoff).
+    let mut wt = p.wall_types.iter().find(|t| t.id == eg.wall_type_id).unwrap().clone();
+    wt.id = "aw-holz".into();
+    let mut wood = p.components.iter().find(|c| c.id == wt.layers[0].component_id).unwrap().clone();
+    wood.id = "holz".into();
+    wood.color = "#b5895a".into();
+    p.components.push(wood);
+    wt.layers[0].component_id = "holz".into();
+    p.wall_types.push(wt);
+    p.walls.iter_mut().find(|w| w.id == "W5").unwrap().wall_type_id = "aw-holz".into();
+    let s = seam(&p);
+    let len: f64 = s.iter().map(|(a, b)| (b.x - a.x).abs()).sum();
+    assert!(len > 4.0, "Materialfuge fehlt: {s:?}");
 }

@@ -1,4 +1,4 @@
-//! Ansichts-Geometrie ([K3c]): Verdeckungs-Clipping, Punkt-Verdeckung, Schlagschatten und
+//! Ansichts-Geometrie ([K3c]): Verdeckungs-Clipping, Punkt-Verdeckung und
 //! XOR-Umriss frontaler Flächengruppen (`toElevation.ts`: `clipSegmentVisible`, `isPointOccluded`,
 //! `buildShadows`, `xorOutlineEdges`). Flächenaufbau, Stil, Painter-Ordnung und Pick-IDs bleiben in
 //! TS. Rechenreihenfolge und Zahlsemantik wie dort.
@@ -13,13 +13,10 @@
 //! ## Punkte
 //! `occluded_points(occ, pts)` mit `pts = [m, (u, v, tiefe) × m]` → `[m, 0/1 × m]`.
 //!
-//! ## Schatten
-//! `shadows(walls, slabs)`, Wände `[n, (tiefe, tiefeMin, k, u, v …) × n]` (tiefeMin ungenutzt), Werfer
-//! `[n, (tiefe, tiefeMin, tiefeLinks, tiefeRechts, k, u, v …) × n]` (Tiefe am linken/rechten Ende, [157]) →
-//! `[r, (tiefe, k, u, v …) × r]`.
+//! Schlagschatten: `plan/elevation/sun.rs` ([316], aus dem Sonnenstand).
 //!
 //! ## Flächen
-//! `faces_full(frame, walls, slabs, roofs)`; `frame = [Px,Py,Pz, Nx,Ny,Nz, Ux,Uy,Uz]` (Welt, Y oben).
+//! `faces_full_with(frame, walls, slabs, roofs, all)`; `frame = [Px,Py,Pz, Nx,Ny,Nz, Ux,Uy,Uz]` (Welt, Y oben).
 //! ```text
 //! walls  [n, (sx, sz, ex, ez, dicke, hoehe, basis) × n]
 //! slabs  [n, (zUnten, zOben, k, x, z …) × n]   [281] geneigt: k negativ (−Ecken), dann ox, oy, gx, gy vor den Ecken
@@ -28,7 +25,7 @@
 //! ```
 //! Die Kanten der Ansicht rechnet `hlr.rs` exakt aus diesen Flächen ([G4]).
 //! Reihenfolge: Wände, Decken, Dächer (je Quelle in Modellreihenfolge); nur sichtbare Flächen
-//! (Rückseiten-Culling, Tiefe > 0).
+//! (Rückseiten-Culling, Tiefe > 0). `all`: alle Flächen ([316] Schattenwerfer).
 //!
 //! ## Öffnungen
 //! `openings(frame, in)` mit `in = [n, Öffnung × n]`, Öffnung =
@@ -59,11 +56,6 @@ use crate::ugrid::Grid1;
 
 const OCC_MARGIN: f64 = 2e-3;
 const EPS: f64 = 1e-6;
-const MAX_SHADOW_DELTA: f64 = 1.2;
-/// [157] Kleinster Versatz (m) einer werfenden Stirn vor der Fläche, der einen Schatten gibt.
-const MIN_SHADOW_DELTA: f64 = 0.005;
-const SUN_U: f64 = 1.0;
-const SUN_V: f64 = -1.0;
 
 type P = (f64, f64);
 
@@ -323,218 +315,6 @@ pub fn occluded_points(occ: &[f64], pts: &[f64]) -> Vec<f64> {
     f
 }
 
-fn clip_polygon_to_rect(poly: &[P], r: [f64; 4]) -> Vec<P> {
-    fn clip(input: &[P], inside: impl Fn(P) -> bool, intersect: impl Fn(P, P) -> P) -> Vec<P> {
-        let mut out = Vec::new();
-        for i in 0..input.len() {
-            let a = input[i];
-            let b = input[(i + 1) % input.len()];
-            let (ain, bin) = (inside(a), inside(b));
-            if ain {
-                out.push(a);
-            }
-            if ain != bin {
-                out.push(intersect(a, b));
-            }
-        }
-        out
-    }
-    let lerp = |a: P, b: P, t: f64| -> P { (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t) };
-    let (u_min, u_max, v_min, v_max) = (r[0], r[1], r[2], r[3]);
-    let mut p = poly.to_vec();
-    p = clip(&p, |q| q.0 >= u_min, |a, b| lerp(a, b, (u_min - a.0) / (b.0 - a.0)));
-    if p.len() < 3 {
-        return Vec::new();
-    }
-    p = clip(&p, |q| q.0 <= u_max, |a, b| lerp(a, b, (u_max - a.0) / (b.0 - a.0)));
-    if p.len() < 3 {
-        return Vec::new();
-    }
-    p = clip(&p, |q| q.1 >= v_min, |a, b| lerp(a, b, (v_min - a.1) / (b.1 - a.1)));
-    if p.len() < 3 {
-        return Vec::new();
-    }
-    p = clip(&p, |q| q.1 <= v_max, |a, b| lerp(a, b, (v_max - a.1) / (b.1 - a.1)));
-    if p.len() < 3 {
-        return Vec::new();
-    }
-    p
-}
-
-/// [157] Teil 4: Mikrostufen einer Schattenkante (zwischen Werfer-Facetten) entfallen: Ecken an einer Kante kürzer
-/// als `tol`, die weniger als `tol` von der Verbindung ihrer Nachbarn abweichen — nicht aber Ecken auf dem Rand
-/// `rect` der Empfängerfläche, damit die Schatten benachbarter Flächen lückenlos aneinander schliessen.
-fn smooth_ring(ring: &mut Vec<P>, rect: [f64; 4], tol: f64) {
-    if !(tol > 0.0) {
-        return;
-    }
-    let fixed = |q: P| [rect[0], rect[1]].iter().any(|u| (q.0 - u).abs() < 1e-7) || [rect[2], rect[3]].iter().any(|v| (q.1 - v).abs() < 1e-7);
-    // Abweichung von der Sehne der Nachbarn, nur an einer kurzen Kante (Stufe, nicht schmaler Streifen).
-    let dev = |a: P, q: P, b: P| {
-        if hypot2(q.0 - a.0, q.1 - a.1).min(hypot2(b.0 - q.0, b.1 - q.1)) >= tol {
-            return f64::INFINITY;
-        }
-        let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-        let l = hypot2(dx, dy);
-        if l < 1e-12 { hypot2(q.0 - a.0, q.1 - a.1) } else { ((q.0 - a.0) * dy - (q.1 - a.1) * dx).abs() / l }
-    };
-    while ring.len() > 3 {
-        let n = ring.len();
-        let best = (0..n)
-            .filter(|&i| !fixed(ring[i]))
-            .map(|i| (i, dev(ring[(i + n - 1) % n], ring[i], ring[(i + 1) % n])))
-            .filter(|(_, d)| *d < tol)
-            .min_by(|a, b| a.1.total_cmp(&b.1));
-        let Some((i, _)) = best else { break };
-        ring.remove(i);
-    }
-}
-
-/// Schlagschatten der Werfer (`slabs`: Kopf Mittel-, Mindest-, linke und rechte Tiefe) auf die Empfänger
-/// (`walls`: gleicher Kopf). [157] Empfänger- und Werfertiefe linear über u: der Schatten einer geraden Stirn auf
-/// einer ebenen Facette ist exakt, die Kanten benachbarter Facetten einer Bogenwand treffen sich. Teil 4: Werfer
-/// treffen auch Flächen, die erst um den Versatz versetzt (in Sonnenrichtung) neben ihnen liegen (vorher an jeder
-/// Facetten-Ecke eines Bogendachs ein Sägezahn); die Schatten je Empfängerfläche werden vereinigt und Absätze
-/// unter `tol` (Meter, Papier 0.2 mm) geglättet.
-pub fn shadows(walls: &[f64], slabs: &[f64], tol: f64) -> Vec<f64> {
-    let (Some(walls), Some(slabs)) = (read_polys(walls, 4), read_polys(slabs, 4)) else {
-        return Vec::new();
-    };
-    if !tol.is_finite() {
-        return Vec::new();
-    }
-    // Schatten je Empfängerfläche (Index), in der Reihenfolge des ersten Treffers.
-    let mut res: Vec<(usize, Vec<Vec<P>>)> = Vec::new();
-    let mut slot: Vec<Option<usize>> = vec![None; walls.len()];
-    // Reichweite des Versatzes in u (Sonne von links: nach rechts).
-    let (reach_l, reach_r) = (MAX_SHADOW_DELTA * (-SUN_U).max(0.0), MAX_SHADOW_DELTA * SUN_U.max(0.0));
-    let wboxes: Vec<[f64; 4]> = walls.iter().map(|(_, w)| bbox_of(w)).collect();
-    let grid = Grid1::new(&wboxes.iter().map(|b| (b[0], b[1])).collect::<Vec<_>>());
-    let mut cand = Vec::new();
-    // [157] Teil 4: Schatten auf Facetten einer gekrümmten Fläche (Nachbar stösst an, gleiche Tiefe an der
-    // gemeinsamen Kante) greift um ein Viertel der Glättung über die Kante, damit keine helle Kantenglättungs-
-    // Fuge zwischen den Schattenstücken bleibt.
-    let lap = 0.25 * tol.max(0.0);
-    let clip_rects: Vec<[f64; 4]> = if lap > 0.0 {
-        let mut near = Vec::new();
-        walls
-            .iter()
-            .zip(&wboxes)
-            .map(|((h, _), b)| {
-                grid.query(b[0] - 1e-6, b[1] + 1e-6, &mut near);
-                let joins = |left: bool| {
-                    near.iter().any(|&j| {
-                        let (hj, bj) = (&walls[j as usize].0, wboxes[j as usize]);
-                        let (edge, edge_j, d, dj) = if left { (b[0], bj[1], h[2], hj[3]) } else { (b[1], bj[0], h[3], hj[2]) };
-                        (edge - edge_j).abs() < 1e-6 && (d - dj).abs() < 1e-3 && bj[2] < b[3] - EPS && bj[3] > b[2] + EPS
-                    })
-                };
-                [b[0] - if joins(true) { lap } else { 0.0 }, b[1] + if joins(false) { lap } else { 0.0 }, b[2], b[3]]
-            })
-            .collect()
-    } else {
-        wboxes.clone()
-    };
-    // Tiefe linear über u aus den Enden (`d0` bei `u0`, `d1` bei `u1`); ohne Breite konstant.
-    let linear = |u0: f64, u1: f64, d0: f64, d1: f64, fallback: f64| -> (f64, f64) {
-        if !(d0.is_finite() && d1.is_finite()) || (u1 - u0).abs() < 1e-9 {
-            return (fallback, 0.0);
-        }
-        let k = (d1 - d0) / (u1 - u0);
-        (d0 - k * u0, k)
-    };
-    for (sh, spts) in &slabs {
-        let so = bbox_of(spts);
-        let (c0, c1) = linear(so[0], so[1], sh[2], sh[3], sh[1]);
-        grid.query(so[0] - reach_l, so[1] + reach_r, &mut cand);
-        for &wi in &cand {
-            let (wh, _) = &walls[wi as usize];
-            let wo = wboxes[wi as usize];
-            let delta = wh[0] - sh[1];
-            if delta <= EPS || delta > MAX_SHADOW_DELTA {
-                continue;
-            }
-            if so[1] + reach_r <= wo[0] + EPS || so[0] - reach_l >= wo[1] - EPS {
-                continue;
-            }
-            let v_top = so[2];
-            // [157] Versatz δ(u) an einem Punkt u der Stirn: der Strahl trifft die Empfängerebene bei u + δ·SUN_U, dort
-            // ist ihre Tiefe r(u + δ·SUN_U) = Stirntiefe c(u) + δ ⇒ δ = (r0 + r1·u − c(u)) / (1 − r1·SUN_U).
-            let (r0, r1) = linear(wo[0], wo[1], wh[2], wh[3], wh[0]);
-            // Fläche fast parallel zu den Sonnenstrahlen (oder von der Sonne abgewandt): kein Schlagschatten.
-            let den = 1.0 - r1 * SUN_U;
-            if den <= 0.2 {
-                continue;
-            }
-            let end = |u: f64| {
-                let d = (r0 + r1 * u - (c0 + c1 * u)) / den;
-                if d.is_finite() { d.clamp(0.0, MAX_SHADOW_DELTA) } else { 0.0 }
-            };
-            // Nur der Teil der Stirn, dessen Schatten diese Fläche treffen kann (sonst wüchse δ über das Höchstmass
-            // hinaus und die Kante knickte an der Begrenzung).
-            let (ua, ub) = (so[0].max(wo[0] - reach_r), so[1].min(wo[1] + reach_l));
-            if ub - ua <= EPS {
-                continue;
-            }
-            let (dl, dr) = (end(ua), end(ub));
-            // Bündige Stirn (an beiden Enden kein Versatz): kein Schatten, auch kein entarteter Streifen.
-            if dl.max(dr) <= MIN_SHADOW_DELTA {
-                continue;
-            }
-            let par = [
-                (ua, v_top),
-                (ub, v_top),
-                (ub + dr * SUN_U, v_top + dr * SUN_V),
-                (ua + dl * SUN_U, v_top + dl * SUN_V),
-            ];
-            let mut clipped = clip_polygon_to_rect(&par, clip_rects[wi as usize]);
-            // Doppelte Ecken (Stirn-Ende genau auf dem Flächenrand) entfallen.
-            clipped.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12);
-            while clipped.len() > 1 && clipped.first().zip(clipped.last()).is_some_and(|(a, b)| (a.0 - b.0).abs() < 1e-12 && (a.1 - b.1).abs() < 1e-12) {
-                clipped.pop();
-            }
-            if clipped.len() >= 3 {
-                let k = *slot[wi as usize].get_or_insert_with(|| {
-                    res.push((wi as usize, Vec::new()));
-                    res.len() - 1
-                });
-                res[k].1.push(clipped);
-            }
-        }
-    }
-    let mut out: Vec<(f64, Vec<P>)> = Vec::new();
-    for (wi, pieces) in res {
-        let depth = walls[wi].0[0];
-        let rect = clip_rects[wi];
-        // Vereinigung (i_overlay); mit Loch (unerwartet) die Stücke wie berechnet.
-        let rings: Vec<Vec<P>> = if pieces.len() > 1 {
-            let polys: Vec<crate::flat::Polygon> = pieces.iter().map(|r| vec![r.iter().map(|q| [q.0, q.1]).collect()]).collect();
-            let u = crate::polygon_bool::union(&polys);
-            if !u.is_empty() && u.iter().all(|p| p.len() == 1) {
-                u.into_iter().map(|mut p| p.swap_remove(0).into_iter().map(|q| (q[0], q[1])).collect()).collect()
-            } else {
-                pieces
-            }
-        } else {
-            pieces
-        };
-        for mut r in rings {
-            smooth_ring(&mut r, rect, tol);
-            if r.len() >= 3 {
-                out.push((depth, r));
-            }
-        }
-    }
-    let mut f = vec![out.len() as f64];
-    for (d, pts) in out {
-        f.push(d);
-        f.push(pts.len() as f64);
-        for p in pts {
-            f.extend([p.0, p.1]);
-        }
-    }
-    f
-}
 
 // ── Flächen ────────────────────────────────────────────────────────────────
 
@@ -545,6 +325,8 @@ struct Frame {
     p: V3,
     n: V3,
     u: V3,
+    /// [316] Alle Flächen (ohne Rückseiten-Culling und Tiefenprüfung): Schattenwerfer.
+    all: bool,
 }
 
 pub(crate) struct Projected {
@@ -582,7 +364,7 @@ fn project_point(f: &Frame, w: V3) -> (f64, f64, f64) {
 
 fn project_face(f: &Frame, poly: &[V3], normal: V3, role: u8, src: usize) -> Option<Projected> {
     let facing = f.n[0] * normal[0] + f.n[1] * normal[1] + f.n[2] * normal[2];
-    if facing >= -FACING_EPS {
+    if facing >= -FACING_EPS && !f.all {
         return None;
     }
     let mut pts = Vec::with_capacity(poly.len());
@@ -597,7 +379,7 @@ fn project_face(f: &Frame, poly: &[V3], normal: V3, role: u8, src: usize) -> Opt
         dmax = max(dmax, d);
     }
     let depth = sum / poly.len() as f64;
-    if depth <= EPS {
+    if depth <= EPS && !f.all {
         return None;
     }
     Some(Projected { role, src, depth, depth_min: dmin, depth_max: dmax, normal, pts, pd })
@@ -794,7 +576,8 @@ fn counted(f: &[f64]) -> Option<usize> {
 }
 
 /// Sichtbare Flächen der Wände, Decken und Dächer mit der Tiefe je Ecke; `None` bei Unsinn.
-pub(crate) fn faces_full(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64]) -> Option<Vec<Projected>> {
+/// `all` = auch abgewandte Flächen und solche vor der Ebene ([316] Schattenwerfer).
+pub(crate) fn faces_full_with(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f64], all: bool) -> Option<Vec<Projected>> {
     if frame.len() != 9 || frame.iter().any(|v| !v.is_finite()) {
         return None;
     }
@@ -802,6 +585,7 @@ pub(crate) fn faces_full(frame: &[f64], walls: &[f64], slabs: &[f64], roofs: &[f
         p: [frame[0], frame[1], frame[2]],
         n: [frame[3], frame[4], frame[5]],
         u: [frame[6], frame[7], frame[8]],
+        all,
     };
     let (Some(nw), Some(ns), Some(nr)) = (counted(walls), counted(slabs), counted(roofs)) else {
         return None;
@@ -1303,6 +1087,7 @@ pub fn openings(frame: &[f64], inp: &[f64]) -> Vec<f64> {
         p: [frame[0], frame[1], frame[2]],
         n: [frame[3], frame[4], frame[5]],
         u: [frame[6], frame[7], frame[8]],
+        all: false,
     };
     // Werte dürfen NaN tragen (= „fehlt"); sonst nur endliche.
     let Some(n) = inp.first().copied().filter(|n| *n >= 0.0 && n.fract() == 0.0).map(|n| n as usize) else {
@@ -1417,15 +1202,15 @@ mod tests {
         // Betrachter bei z = -2, Blick +z; Wand 4 m lang bei z = 0, 3 m hoch.
         let frame = [-1.0, 0.0, -2.0, 0.0, 0.0, 1.0, 1.0, 0.0, 0.0];
         let walls = [1.0, 0.0, 0.0, 4.0, 0.0, 0.2, 3.0, 0.0];
-        let f = faces_full(&frame, &walls, &[0.0], &[0.0]).unwrap();
+        let f = faces_full_with(&frame, &walls, &[0.0], &[0.0], false).unwrap();
         assert_eq!(f.len(), 1);
         assert_eq!((f[0].role, f[0].src), (0, 0)); // Rolle Wand, Quelle 0
         assert!((f[0].depth - 1.9).abs() < 1e-9); // Südseite bei z = -0.1
         assert!(f[0].pd.iter().all(|d| (d - 1.9).abs() < 1e-9));
         // hinter dem Betrachter: nichts
         let walls = [1.0, 0.0, -5.0, 4.0, -5.0, 0.2, 3.0, 0.0];
-        assert!(faces_full(&frame, &walls, &[0.0], &[0.0]).unwrap().is_empty());
-        assert!(faces_full(&frame, &[f64::NAN], &[0.0], &[0.0]).is_none());
+        assert!(faces_full_with(&frame, &walls, &[0.0], &[0.0], false).unwrap().is_empty());
+        assert!(faces_full_with(&frame, &[f64::NAN], &[0.0], &[0.0], false).is_none());
     }
 
     #[test]
@@ -1442,205 +1227,12 @@ mod tests {
     #[test]
     fn unsinn_ist_leer() {
         assert!(clip_segments(&[f64::NAN], &[0.0]).is_empty());
-        assert!(shadows(&[1.0], &[0.0], 0.0).is_empty());
     }
 }
 
 #[cfg(test)]
 mod tests_ts {
     use super::*;
-
-    // Früher `toElevation.test.ts` (buildShadows): Überstand vor der Fassade wirft Schatten.
-    #[test]
-    fn ueberstand_wirft_schatten_nur_bei_ueberlapp() {
-        // Wandfläche u 1..5, v 0..3, Tiefe 1.9; Überstand näher (Tiefe 1.4, depthMin 1.4), unten v 2.8.
-        let wall = [1.0, 1.9, 1.9, 1.9, 1.9, 4.0, 1.0, 0.0, 5.0, 0.0, 5.0, 3.0, 1.0, 3.0];
-        let slab = |u0: f64, u1: f64| vec![1.0, 1.4, 1.4, 1.4, 1.4, 4.0, u0, 2.8, u1, 2.8, u1, 3.0, u0, 3.0];
-        let f = shadows(&wall, &slab(1.0, 5.0), 0.0);
-        assert_eq!(f[0], 1.0);
-        assert_eq!(f[1], 1.9);
-        assert_eq!(shadows(&wall, &slab(20.0, 24.0), 0.0), vec![0.0]);
-    }
-
-    /// [157] Gekrümmte Deckenstirn (Erker, Facetten mit wachsender Tiefe): die Schatten der Facetten schliessen
-    /// lückenlos aneinander (Unterkante je Ende nach der Tiefe dort), nicht je Facette ein waagrechter Treppenabsatz.
-    #[test]
-    fn schatten_gekruemmter_stirn_ohne_treppe() {
-        let wall = [1.0, 2.0, 2.0, 2.0, 2.0, 4.0, 0.0, 0.0, 6.0, 0.0, 6.0, 3.0, 0.0, 3.0];
-        // Zwei Facetten u 1..2 (Tiefe 1.4 → 1.6) und 2..3 (1.6 → 1.8), Unterkante v 2.8.
-        let mut slabs = vec![2.0];
-        slabs.extend([1.5, 1.4, 1.4, 1.6, 4.0, 1.0, 2.8, 2.0, 2.8, 2.0, 3.0, 1.0, 3.0]);
-        slabs.extend([1.7, 1.6, 1.6, 1.8, 4.0, 2.0, 2.8, 3.0, 2.8, 3.0, 3.0, 2.0, 3.0]);
-        let f = shadows(&wall, &slabs, 0.0);
-        // Teil 4: beide Facetten auf derselben Fläche zu einem Polygon vereinigt.
-        assert_eq!(f[0], 1.0);
-        let polys = read_polys(&f, 1).unwrap();
-        let a = &polys[0].1;
-        // Unterkante durchgehend: bei u 2.4 auf v 2.4 (Tiefe 1.6 → δ = 0.4), kein Absatz.
-        assert!(point_in_poly((2.4, 2.41), a) && !point_in_poly((2.4, 2.39), a), "{a:?}");
-        // Linkes Ende tiefer im Schatten (δ = 0.6 → (1.6, 2.2)), rechtes weniger tief (δ = 0.2 → (3.2, 2.6)).
-        let has = |q: P| a.iter().any(|p| (p.0 - q.0).abs() < 1e-6 && (p.1 - q.1).abs() < 1e-6);
-        assert!(has((1.6, 2.2)) && has((3.2, 2.6)), "{a:?}");
-    }
-
-    /// [157] Gekrümmte Empfängerfläche (Erker-Bogenwand, Facetten mit wachsender Tiefe): der Schatten einer
-    /// geraden Stirn rechnet mit der Tiefe je Punkt der Facette, nicht mit ihrem Mittel — die Schattenkanten
-    /// zweier Facetten treffen sich an der gemeinsamen Kante (vorher je Facette ein Absatz).
-    #[test]
-    fn schatten_auf_gekruemmter_wand_mit_tiefe_je_punkt() {
-        // Empfänger A: u 0..2, Tiefe 2.0 → 2.4; B: u 2..4, Tiefe 2.4 → 2.6 (Kopf: Mittel, Min, links, rechts).
-        let mut walls = vec![2.0];
-        walls.extend([2.2, 2.0, 2.0, 2.4, 4.0, 0.0, 0.0, 2.0, 0.0, 2.0, 3.0, 0.0, 3.0]);
-        walls.extend([2.5, 2.4, 2.4, 2.6, 4.0, 2.0, 0.0, 4.0, 0.0, 4.0, 3.0, 2.0, 3.0]);
-        // Gerade Stirn u 0..4, Tiefe 1.8, Unterkante v 2.8.
-        let slabs = vec![1.0, 1.8, 1.8, 1.8, 1.8, 4.0, 0.0, 2.8, 4.0, 2.8, 4.0, 3.0, 0.0, 3.0];
-        let f = shadows(&walls, &slabs, 0.0);
-        let polys = read_polys(&f, 1).unwrap();
-        assert_eq!(polys.len(), 2);
-        // Unterste Schattenecke an der gemeinsamen Kante u = 2: δ = 0.6 (exakt aus den Tiefen) → v = 2.2.
-        let at2 = |pts: &[P]| pts.iter().filter(|q| (q.0 - 2.0).abs() < 1e-9).map(|q| q.1).fold(f64::INFINITY, f64::min);
-        let (a, b) = (at2(&polys[0].1), at2(&polys[1].1));
-        assert!((a - 2.2).abs() < 1e-9 && (b - 2.2).abs() < 1e-9, "{:?} {:?}", polys[0].1, polys[1].1);
-    }
-
-    /// Facetten-Datensatz für `shadows`: Kopf (Mittel-, Mindest-, linke, rechte Tiefe), Rechteck u0..u1 × v0..v1.
-    fn facet(out: &mut Vec<f64>, u0: f64, u1: f64, d0: f64, d1: f64, v0: f64, v1: f64) {
-        out[0] += 1.0;
-        out.extend([(d0 + d1) / 2.0, d0.min(d1), d0, d1, 4.0, u0, v0, u1, v0, u1, v1, u0, v1]);
-    }
-
-    fn poly_area(p: &[P]) -> f64 {
-        (0..p.len()).map(|i| { let (a, b) = (p[i], p[(i + 1) % p.len()]); a.0 * b.1 - b.0 * a.1 }).sum::<f64>().abs() / 2.0
-    }
-
-    /// Unterste Schattenkante bei u (von der Stirn-Unterkante `top` abwärts in 1-mm-Schritten); `None`, wenn u
-    /// gleich unter der Stirn nicht im Schatten liegt. Zudem, ob der Schatten bis dorthin lückenlos ist.
-    fn shadow_bottom(polys: &[(Vec<f64>, Vec<P>)], u: f64, top: f64) -> Option<f64> {
-        let inside = |v: f64| polys.iter().any(|(_, p)| point_in_poly((u, v), p));
-        if !inside(top - 5e-4) {
-            return None;
-        }
-        let mut v = top - 5e-4;
-        while v > top - 2.0 && inside(v - 1e-3) {
-            v -= 1e-3;
-        }
-        Some(v)
-    }
-
-    /// [157] Teil 4: gerade Stirn in drei Facetten über einer ebenen, fein facettierten Wand. Der Schatten einer
-    /// Facette reicht über ihr Ende hinaus auf die Nachbarflächen (vorher nur auf Flächen, die die Facette im
-    /// Grundriss-u überdecken: an jeder Facetten-Ecke ein Sägezahn); je Empfänger ein vereinigtes Polygon,
-    /// Fläche wie das analytische Parallelogramm.
-    #[test]
-    fn schatten_einer_facettierten_stirn_ohne_saegezahn() {
-        let mut walls = vec![0.0];
-        for k in 0..8 {
-            facet(&mut walls, 0.5 * k as f64, 0.5 * (k + 1) as f64, 2.0, 2.0, 0.0, 3.0);
-        }
-        let mut slabs = vec![0.0];
-        for (a, b) in [(0.0, 1.3), (1.3, 2.6), (2.6, 4.0)] {
-            facet(&mut slabs, a, b, 1.7, 1.7, 2.8, 3.0);
-        }
-        let polys = read_polys(&shadows(&walls, &slabs, 0.0), 1).unwrap();
-        assert_eq!(polys.len(), 8, "je Empfänger ein Polygon: {polys:?}");
-        // δ = 0.3: Parallelogramm (0, 2.8) (4, 2.8) (4, 2.5) (0.3, 2.5).
-        let area: f64 = polys.iter().map(|(_, p)| poly_area(p)).sum();
-        assert!((area - (4.0 * 0.3 - 0.3 * 0.3 / 2.0)).abs() < 1e-6, "Fläche {area}");
-        for k in 0..70 {
-            let u = 0.35 + 0.05 * k as f64;
-            let b = shadow_bottom(&polys, u, 2.8).unwrap();
-            assert!((b - 2.5).abs() < 2e-3, "Unterkante bei u {u}: {b}");
-        }
-    }
-
-    /// [157] Teil 4: Bogen-Vordach (Polygon-Bogen, 8 Facetten, r 2.3) über einer Bogenwand (24 Facetten, r 2.0),
-    /// konzentrisch, Blick auf die Rundung. Die Schattenkante läuft lückenlos und ohne Rücksprünge; der Abstand
-    /// zur analytischen Kante (Kreis über Kreis) bleibt unter dem Stichmass der Dachfacetten.
-    #[test]
-    fn schatten_unter_bogen_vordach_glatt() {
-        let (rw, rr, d0) = (2.0_f64, 2.3_f64, 10.0);
-        let at = |r: f64, t: f64| (r * t.sin(), d0 - r * t.cos());
-        let half = std::f64::consts::FRAC_PI_2;
-        let mut walls = vec![0.0];
-        for k in 0..24 {
-            let (a, b) = (at(rw, -half + std::f64::consts::PI * k as f64 / 24.0), at(rw, -half + std::f64::consts::PI * (k + 1) as f64 / 24.0));
-            facet(&mut walls, a.0, b.0, a.1, b.1, 0.0, 3.0);
-        }
-        let mut slabs = vec![0.0];
-        for k in 0..8 {
-            let (a, b) = (at(rr, -half + std::f64::consts::PI * k as f64 / 8.0), at(rr, -half + std::f64::consts::PI * (k + 1) as f64 / 8.0));
-            facet(&mut slabs, a.0, b.0, a.1, b.1, 2.8, 3.1);
-        }
-        let polys = read_polys(&shadows(&walls, &slabs, 0.0), 1).unwrap();
-        // Analytisch: Strahl (u, d) + s·(1, 1) vom Kreis r 2.3 auf den Kreis r 2.0 (Sonne 45° von links, u nach rechts).
-        let exact = |u_w: f64| -> Option<f64> {
-            // Punkt der Wand bei u_w (vordere Hälfte), rückwärts zur Stirn: (u_w − s, d_w − s) auf r 2.3.
-            let d_w = d0 - (rw * rw - u_w * u_w).max(0.0).sqrt();
-            let (x, y) = (u_w, d_w - d0);
-            // (x − s)² + (y − s)² = rr² ⇒ 2s² − 2(x + y)s + x² + y² − rr² = 0, kleinere Wurzel s ≥ 0.
-            let (a, b, c) = (2.0, -2.0 * (x + y), x * x + y * y - rr * rr);
-            let disc = b * b - 4.0 * a * c;
-            (disc >= 0.0).then(|| (-b - disc.sqrt()) / (2.0 * a)).filter(|s| *s >= 0.0).map(|s| 2.8 - s)
-        };
-        let sag = rr * (1.0 - (std::f64::consts::PI / 16.0).cos());
-        let mut prev: Option<f64> = None;
-        for k in 0..=300 {
-            // Linke Hälfte bis knapp über die Mitte (rechts wird die Wand streifend, s. `den`).
-            let u = -1.9 + 2.4 * k as f64 / 300.0;
-            let Some(b) = shadow_bottom(&polys, u, 2.8) else { panic!("kein Schatten bei u {u}") };
-            if let Some(e) = exact(u) {
-                assert!((b - e).abs() < 2.0 * sag + 3e-3, "u {u}: Kante {b}, analytisch {e}");
-            }
-            if let Some(p) = prev {
-                assert!((b - p).abs() < 0.02, "Sprung bei u {u}: {p} → {b}");
-            }
-            prev = Some(b);
-        }
-    }
-
-    /// [157] Teil 4: Mikrostufen unter der Toleranz (Papier 0.2 mm) entfallen, Ecken auf dem Empfängerrand bleiben.
-    #[test]
-    fn schatten_mikrostufen_geglaettet() {
-        let mut walls = vec![0.0];
-        facet(&mut walls, 0.0, 4.0, 2.0, 2.0, 0.0, 3.0);
-        // Zwei Stirnfacetten, die zweite 1 mm weiter hinten: Unterkante mit 1-mm-Absatz.
-        let mut slabs = vec![0.0];
-        facet(&mut slabs, 0.0, 2.0, 1.7, 1.7, 2.8, 3.0);
-        facet(&mut slabs, 2.0, 4.0, 1.701, 1.701, 2.8, 3.0);
-        let raw = read_polys(&shadows(&walls, &slabs, 0.0), 1).unwrap();
-        let smooth = read_polys(&shadows(&walls, &slabs, 0.02), 1).unwrap();
-        assert_eq!((raw.len(), smooth.len()), (1, 1));
-        assert!(smooth[0].1.len() < raw[0].1.len(), "{:?} → {:?}", raw[0].1, smooth[0].1);
-        assert!(smooth[0].1.len() >= 4);
-        let (ar, asm) = (poly_area(&raw[0].1), poly_area(&smooth[0].1));
-        assert!((ar - asm).abs() < 0.02 * 4.0, "{ar} {asm}");
-        // Rechte Ecken am Flächenrand u = 4 unverändert.
-        assert!(smooth[0].1.iter().filter(|q| (q.0 - 4.0).abs() < 1e-9).count() >= 2);
-        // Schmaler Streifen (δ 15 mm < Toleranz) bleibt ein Viereck, wird nicht zum Dreieck.
-        let mut thin = vec![0.0];
-        facet(&mut thin, 1.0, 2.0, 1.985, 1.985, 2.8, 3.0);
-        let s = read_polys(&shadows(&walls, &thin, 0.02), 1).unwrap();
-        assert_eq!(s[0].1.len(), 4, "{:?}", s[0].1);
-    }
-
-    /// [157] Teil 4: an der gemeinsamen Kante zweier gleich tiefer Facetten überlappen sich die Schatten um ein
-    /// Viertel der Glättung (keine helle Fuge); am freien Rand und an einer Stufe in der Tiefe nicht.
-    #[test]
-    fn schatten_ueberlappt_an_facettenkante() {
-        let mut walls = vec![0.0];
-        facet(&mut walls, 0.0, 2.0, 2.0, 2.0, 0.0, 3.0);
-        facet(&mut walls, 2.0, 4.0, 2.0, 2.0, 0.0, 3.0);
-        facet(&mut walls, 4.0, 6.0, 2.5, 2.5, 0.0, 3.0);
-        let mut slabs = vec![0.0];
-        facet(&mut slabs, 0.0, 6.0, 1.7, 1.7, 2.8, 3.0);
-        let polys = read_polys(&shadows(&walls, &slabs, 0.04), 1).unwrap();
-        let span = |k: usize| polys[k].1.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.0), b.max(q.0)));
-        assert_eq!(polys.len(), 3);
-        let (a, b, c) = (span(0), span(1), span(2));
-        assert!((a.0 - 0.0).abs() < 1e-9 && (a.1 - 2.01).abs() < 1e-9, "{a:?}");
-        assert!((b.0 - 1.99).abs() < 1e-9 && (b.1 - 4.0).abs() < 1e-9, "{b:?}");
-        assert!((c.0 - 4.0).abs() < 1e-9 && (c.1 - 6.0).abs() < 1e-9, "{c:?}");
-    }
 
     #[test]
     fn verdeckte_punkte_ueber_das_raster_wie_ohne() {

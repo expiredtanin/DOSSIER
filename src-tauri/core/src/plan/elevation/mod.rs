@@ -1,11 +1,12 @@
 //! Ansicht auf dem Dokument ([K3c]): Rust-Gegenstück zu `src/plan/toElevation.ts` (Orchestrierung,
 //! Stil, Painter-Reihenfolge). Die Geometrie (Flächen, Eck-Verlängerung, Öffnungen, Verdeckung,
-//! Schatten, XOR-Umriss) rechnet `elevation_geom.rs`; hier werden sie aus dem Dokument gespeist,
+//! XOR-Umriss) rechnet `elevation_geom.rs`, die Schlagschatten aus dem Sonnenstand `sun` ([316]); hier werden sie aus dem Dokument gespeist,
 //! gestylt, mit Pick-Ids versehen und fern → nah sortiert. Zahlsemantik wie in TS.
 //!
 //! [165] Aus einer Datei aufgeteilt (Reihenfolge = Rechenweg): `face` (Flächen, Stil-Übersteuerung),
 //! `cull` (Dach verdeckt Wände), `collect` (Flächen aus dem Modell), `mesh_cull` (importierte Netze),
-//! `openings` (Fenster/Türen), `silhouette` (Umrisse, Kanten, Gelände), `patterns` (Oberflächenmuster).
+//! `openings` (Fenster/Türen), `silhouette` (Umrisse, Kanten, Gelände), `patterns` (Oberflächenmuster, Materialfugen),
+//! `sun` (Schlagschatten).
 //! Hier bleiben die gemeinsamen Konstanten, die Orchestrierung (`elevation_primitives_with()`) und die
 //! Abfrage `elevation_plan_buf()`.
 
@@ -27,6 +28,7 @@ mod mesh_cull;
 mod openings;
 mod silhouette;
 mod patterns;
+mod sun;
 
 use face::*;
 use cull::*;
@@ -56,8 +58,12 @@ const GLASS_FILL_COLOR: &str = "#d3d8dd";
 /// [279] Deckkraft des Glasgeländers (Glas der Fenster ist gefüllt, aber vor Linien nicht durchscheinend).
 pub(crate) const GLASS_OPACITY: f64 = 0.4;
 const SHADOW_FILL: &str = "#8f959e";
-/// [157] Teil 4: Schattenkanten-Absätze unter so viel Papier-mm entfallen.
-const SHADOW_SMOOTH_MM: f64 = 0.2;
+/// [316] Schlagschatten über Öffnungen: durchscheinend (Glas und Rahmen bleiben lesbar).
+const GLASS_SHADOW_OPACITY: f64 = 0.45;
+/// [316] Öffnung gilt als in der Empfängerfläche, wenn sie höchstens so viel (m) vor deren Mitteltiefe liegt.
+const OPENING_RECV_TOL: f64 = 0.05;
+/// [316] Leibungstiefe (m) für den Leibungsschatten der Öffnungen.
+const REVEAL_DEPTH: f64 = 0.08;
 const OPENING_SHADOW_FILL: &str = "#a7adb5";
 const GROUND_INK: &str = "#1f242c";
 /// [208] Terrain-/Bodenlinie kräftig (SIA-Praxis: stärkste Linie der Ansicht; 0.38 mm bei 1:200 mit Massstabs-Stärken).
@@ -106,27 +112,6 @@ fn rgb_to_hex(c: [f64; 3]) -> String {
     format!("#{}{}{}", b(c[0]), b(c[1]), b(c[2]))
 }
 
-
-/// Flächen für `elevation_geom::shadows`: Kopf Mittel-, Mindesttiefe und [157] die kleinste Tiefe am linken und
-/// am rechten Ende (u) — für Werfer (Stirn) wie Empfänger (Bogenwand-Facetten). Ohne Tiefe je Ecke gilt an beiden
-/// Enden die Mindest- (`receiver` = false) bzw. die Mitteltiefe.
-fn encode_shadow_polys(faces: &[&Face], receiver: bool) -> Vec<f64> {
-    let mut b = vec![faces.len() as f64];
-    for f in faces {
-        let (u0, u1) = f.pts.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, z), q| (a.min(q[0]), z.max(q[0])));
-        let tol = 1e-6 * (1.0 + (u1 - u0).abs());
-        let at = |u: f64| f.pts.iter().zip(&f.pd).filter(|(q, _)| (q[0] - u).abs() <= tol).map(|(_, d)| *d).fold(f64::INFINITY, f64::min);
-        let flat = if receiver { f.depth } else { f.depth_min };
-        let (dl, dr) = if f.pd.len() == f.pts.len() { (at(u0), at(u1)) } else { (flat, flat) };
-        // Schatten mit der wahren Tiefe der Decken (ohne den Vorrang der Wand, s. `SLAB_BEHIND_WALL`).
-        let k = if f.curved_slab { SLAB_BEHIND_WALL } else { 0.0 };
-        b.extend([f.depth - k, f.depth_min - k, dl - k, dr - k, f.pts.len() as f64]);
-        for q in &f.pts {
-            b.extend(q);
-        }
-    }
-    b
-}
 
 /// Eintrag des Painter-Stroms.
 struct Item {
@@ -620,6 +605,17 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         let b = op.pts.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[0]), b[3].max(q[1])]);
         drop_hole_edges(&mut edges, b);
     }
+    // [316] Materialfugen (Wechsel des Fassadenmaterials zwischen bündigen Wandflächen): auf die sichtbaren Teile
+    // der beiden Flächen beschnitten, gezeichnet wie die Kanten (über Füllungen und Schatten, s. unten).
+    let mut seam_lines: Vec<(Pt, Pt)> = Vec::new();
+    for (a, b, _, own) in material_seams(p, &faces) {
+        let polys: Vec<crate::flat::Polygon> = own.iter().flat_map(|&fi| match regions.get(fi).and_then(|r| r.as_ref()) {
+            Some(v) => v.clone(),
+            None => vec![vec![faces[fi].pts.clone()]],
+        }).collect();
+        let refs: Vec<&crate::flat::Polygon> = polys.iter().collect();
+        seam_lines.extend(crate::hlr_fill::clip_segment_to(a, b, &refs));
+    }
     for (a, b, depth, paint, k, own) in pattern_lines {
         // [G4] Auf die sichtbaren Teile der eigenen Fläche(n) beschnitten.
         match own {
@@ -711,55 +707,100 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         }
         q
     };
+    // [316] Lichtrichtung aus der Schattenstudie (sonst Zeichenregel 45°), in Ansichtskoordinaten.
+    let light = sun::light_dir(p, &frame);
     if shadows {
-        // [G4] Schatten nur auf den sichtbaren Teilen der Wände: auf verdeckten Teilen lagen sie unter den Flächen
-        // davor und schienen durch deren Fugen (Facetten des Erkers).
-        let mut cut: Vec<Face> = Vec::new();
-        let mut wall_faces: Vec<&Face> = Vec::new();
-        for (fi, f) in faces.iter().enumerate().filter(|(_, f)| f.role == Role::Wall) {
-            match regions.get(fi).and_then(|r| r.as_ref()) {
-                None => wall_faces.push(f),
-                Some(polys) => {
-                    let pts3: Vec<[f64; 3]> = f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect();
-                    let Some(pl) = crate::hlr_fill::plane(&pts3) else { continue };
-                    for poly in polys {
-                        let ring = if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() };
-                        if ring.len() < 3 {
-                            continue;
-                        }
-                        let pd: Vec<f64> = ring.iter().map(|q| pl[0] + pl[1] * q[0] + pl[2] * q[1]).collect();
-                        let (dmin, dmax) = pd.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), d| (a.min(*d), b.max(*d)));
-                        cut.push(Face { pts: ring, pd, depth: f.depth, depth_min: dmin, depth_max: dmax, role: f.role, id: f.id.clone(), fill: f.fill, normal: f.normal, ov: f.ov.clone(), two_sided: f.two_sided, curved_slab: f.curved_slab, see_through: f.see_through, perforated: f.perforated });
-                    }
+        // Öffnungen (sichtbar): eigene Empfänger in ihrer Ebene (die Wand hat dort ein Loch), Schatten darüber
+        // durchscheinend (Glas, Rahmen und Teilungen bleiben lesbar).
+        let ops: Vec<(crate::flat::Polygon, f64)> = openings
+            .iter()
+            .enumerate()
+            .filter(|(k, _)| occluded.get(1 + k) != Some(&1.0) && !interior_hidden[*k])
+            .map(|(_, op)| (vec![op.shape.as_ref().map_or(op.frame.as_ref().map_or(op.pts.to_vec(), |f| f.to_vec()), |(o, _, _, _)| o.clone())], op.depth))
+            .collect();
+        let op_boxes: Vec<[f64; 4]> = ops.iter().map(|(r, _)| r.iter().flatten().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].max(q[0]), b[2].min(q[1]), b[3].max(q[1])])).collect();
+        // Empfänger: sichtbare Teile der Wand-, Decken-, Dach-, Stützen- und Körperflächen ([G4]: auf verdeckten
+        // Teilen lägen Schatten unter den Flächen davor und schienen durch deren Fugen).
+        let mut receivers: Vec<sun::Receiver> = Vec::new();
+        let mut recv_depth: Vec<f64> = Vec::new();
+        for (fi, f) in faces.iter().enumerate() {
+            if !matches!(f.role, Role::Wall | Role::Slab | Role::Roof | Role::Column | Role::Body) || f.see_through || !needed.get(fi).copied().unwrap_or(true) {
+                continue;
+            }
+            let pts3: Vec<[f64; 3]> = if f.pd.len() == f.pts.len() { f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect() } else { f.pts.iter().map(|q| [q[0], q[1], f.depth]).collect() };
+            let Some(pl) = crate::hlr_fill::plane(&pts3) else { continue };
+            // Gekrümmte Deckenstirn: um `SLAB_BEHIND_WALL` nach hinten gerückt — Schatten mit der wahren Tiefe.
+            let pl = if f.curved_slab { [pl[0] - SLAB_BEHIND_WALL, pl[1], pl[2]] } else { pl };
+            let region: Vec<crate::flat::Polygon> = match regions.get(fi).and_then(|r| r.as_ref()) {
+                None => vec![vec![f.pts.clone()]],
+                Some(polys) => polys.clone(),
+            };
+            // Durch eine Öffnung davor gesehen (Innenwand hinter der Tür): dort deckt die Öffnung, kein Schatten.
+            let rb = region.iter().flatten().flatten().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].max(q[0]), b[2].min(q[1]), b[3].max(q[1])]);
+            let front: Vec<crate::flat::Polygon> = (0..ops.len()).filter(|&k| ops[k].1 < f.depth - OPENING_RECV_TOL && op_boxes[k][0] < rb[1] && op_boxes[k][1] > rb[0] && op_boxes[k][2] < rb[3] && op_boxes[k][3] > rb[2]).map(|k| ops[k].0.clone()).collect();
+            let region = if front.is_empty() { region } else { crate::polygon_bool::difference(&region, &front) };
+            if region.is_empty() {
+                continue;
+            }
+            receivers.push(sun::Receiver { plane: pl, region });
+            recv_depth.push(f.depth);
+        }
+        // Werfer: alle Flächen der Körper (auch abgewandte), sichtbare Klassen; Glas wirft keinen Schatten.
+        let mut casters: Vec<Vec<[f64; 3]>> = Vec::new();
+        let mut take = |list: Vec<Face>, role: Option<Role>| {
+            for mut f in list {
+                if let Some(r) = role {
+                    f.role = r;
+                }
+                if f.pd.len() == f.pts.len() && category(&f).is_none_or(|c| vis.visible(c) && vis.render(c)) {
+                    casters.push(f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect());
                 }
             }
+        };
+        take(project_faces_with(&frame, &walls, &slabs, &[], true), None);
+        take(collect_roof_faces_with(p, &frame, &walls, true)?, None);
+        take(project_faces_with(&frame, &[], &model3d::column_slabs(p), &[], true), Some(Role::Column));
+        let rails: Vec<RSlab> = model3d::railing_slabs(p).into_iter().filter(|s| !matches!(s.source, model3d::SlabSource::Railing { fill: Some(RailingKind::Glass), .. })).collect();
+        take(project_faces_with(&frame, &[], &rails, &[], true), Some(Role::Railing));
+        for f in faces.iter().filter(|f| f.role == Role::Body && f.pd.len() == f.pts.len()) {
+            casters.push(f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect());
         }
-        wall_faces.extend(cut.iter());
-        let mut casters: Vec<&Face> = faces.iter().filter(|f| f.role == Role::Slab).collect();
-        casters.extend(faces.iter().filter(|f| f.role == Role::Roof));
-        // [157] Teil 4: Absätze unter 0.2 mm Papier glätten.
-        let tol = SHADOW_SMOOTH_MM * 1e-3 * if scale.is_finite() && scale > 0.0 { scale } else { 100.0 };
-        let f = crate::plan::elevation_geom::shadows(&encode_shadow_polys(&wall_faces, true), &encode_shadow_polys(&casters, false), tol);
-        let mut i = 1;
-        for _ in 0..f.first().copied().unwrap_or(0.0) as usize {
-            let depth = f[i];
-            let count = f[i + 1] as usize;
-            i += 2;
-            let pts: Vec<Vec2> = (0..count)
-                .map(|j| {
-                    let (x, y) = (f[i + 2 * j], f[i + 2 * j + 1]);
-                    acc.add(x, y);
-                    v2(x, y)
-                })
-                .collect();
-            i += 2 * count;
+        let mut emit = |poly: &crate::flat::Polygon, depth: f64, opacity: Option<f64>, items: &mut Vec<Item>, seq: &mut usize| {
+            let ring = if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() };
+            // Haarstreifen (Rundung an gemeinsamen Kanten) entfallen.
+            let n = ring.len();
+            if n < 3 || (0..n).map(|i| ring[i][0] * ring[(i + 1) % n][1] - ring[(i + 1) % n][0] * ring[i][1]).sum::<f64>().abs() < 2e-6 {
+                return;
+            }
+            let pts: Vec<Vec2> = ring.iter().map(|q| {
+                acc.add(q[0], q[1]);
+                v2(q[0], q[1])
+            }).collect();
             let mut prim = polygon(pts, if mono { SHADOW_FILL_MONO } else { SHADOW_FILL }, "none", 0.0, no_hatch());
             // [137] Klick auf den Schlagschatten wählt die Schatten-Einstellung der Ansicht (keine Element-Id).
-            if let Primitive::Polygon { context_object_id, .. } = &mut prim {
+            if let Primitive::Polygon { context_object_id, opacity: o, .. } = &mut prim {
                 *context_object_id = Some(crate::plan::extras::SITE_PICK_VIEW_SHADOWS.into());
+                *o = opacity;
             }
-            items.push(Item { depth: depth - EPS * 10.0, seq, rank: None, prim: shadow_style(prim) });
-            seq += 1;
+            items.push(Item { depth, seq: *seq, rank: None, prim: shadow_style(prim) });
+            *seq += 1;
+        };
+        let n_faces = receivers.len();
+        for (r, d) in &ops {
+            receivers.push(sun::Receiver { plane: [*d, 0.0, 0.0], region: vec![r.clone()] });
+        }
+        for (ri, shade) in sun::cast(&receivers, &casters, light).into_iter().enumerate() {
+            if shade.is_empty() {
+                continue;
+            }
+            // Öffnung: durchscheinend knapp vor ihr; Flächen deckend knapp vor der Fläche.
+            let (depth, opacity) = match ri.checked_sub(n_faces) {
+                Some(k) => (ops[k].1 - EPS * 200.0, Some(GLASS_SHADOW_OPACITY)),
+                None => (recv_depth[ri] - EPS * 10.0, None),
+            };
+            for poly in &shade {
+                emit(poly, depth, opacity, &mut items, &mut seq);
+            }
         }
     }
 
@@ -849,11 +890,16 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             let quad_at = |fa: f64, fz: f64| lerp(lerp(q[0], q[1], fa), lerp(q[3], q[2], fa), fz);
             let w_u = hypot2(q[1][0] - q[0][0], q[1][1] - q[0][1]);
             let h_v = hypot2(q[3][0] - q[0][0], q[3][1] - q[0][1]);
-            let f_u = min(0.3, 0.08 / max(w_u, 1e-6));
-            let f_v = min(0.3, 0.08 / max(h_v, 1e-6));
-            for (fa0, fa1, fz0, fz1) in [(0.0, 1.0, 1.0 - f_v, 1.0), (0.0, f_u, 0.0, 1.0 - f_v)] {
-                let r = [quad_at(fa0, fz0), quad_at(fa1, fz0), quad_at(fa1, fz1), quad_at(fa0, fz1)];
-                push(shadow_style(polygon(to_vec(&r), if mono { OPENING_SHADOW_FILL_MONO } else { OPENING_SHADOW_FILL }, "none", 0.0, no_hatch())));
+            // [316] Leibungsschatten (8 cm Leibung) aus der Lichtrichtung: oben und auf der Lichtseite.
+            if let Some((f_u, f_v, left)) = sun::reveal_fractions(light, REVEAL_DEPTH, w_u, h_v) {
+                let (sa, sb) = if left { (0.0, f_u) } else { (1.0 - f_u, 1.0) };
+                for (fa0, fa1, fz0, fz1) in [(0.0, 1.0, 1.0 - f_v, 1.0), (sa, sb, 0.0, 1.0 - f_v)] {
+                    if fa1 - fa0 < 1e-6 || fz1 - fz0 < 1e-6 {
+                        continue;
+                    }
+                    let r = [quad_at(fa0, fz0), quad_at(fa1, fz0), quad_at(fa1, fz1), quad_at(fa0, fz1)];
+                    push(shadow_style(polygon(to_vec(&r), if mono { OPENING_SHADOW_FILL_MONO } else { OPENING_SHADOW_FILL }, "none", 0.0, no_hatch())));
+                }
             }
         }
         for (a, b) in &op.divisions {
@@ -940,6 +986,11 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             let l = outline_line(e.a, e.b);
             prims.push(match ov { Some(o) => o.restyle(l), None => l });
         }
+    }
+    for (a, b) in seam_lines {
+        acc.add(a[0], a[1]);
+        acc.add(b[0], b[1]);
+        prims.push(outline_line(a, b));
     }
     // [T6] Gelände-Silhouette (gestaltetes Terrain) zwischen Ansichtsebene und vorderster Gebäudefläche; was
     // darunter liegt, verdeckt das Gelände (Papierfläche über dem Gebäude).

@@ -26,6 +26,11 @@ pub(super) struct RoofIn {
 
 /// `projectFaces`.
 pub(super) fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[RoofIn]) -> Vec<Face> {
+    project_faces_with(frame, walls, slabs, roofs, false)
+}
+
+/// Wie [`project_faces`]; `all` = alle Flächen der Körper, auch abgewandte ([316] Schattenwerfer).
+pub(super) fn project_faces_with(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], roofs: &[RoofIn], all: bool) -> Vec<Face> {
     let mut w = vec![walls.len() as f64];
     // Mit Schnittlinien (Bogen-Teilkörper, [T2]): die Ecken liegen auf der Gehrung statt rechtwinklig.
     let planes = walls.iter().any(|x| x.top_plane.is_some());
@@ -69,7 +74,7 @@ pub(super) fn project_faces(frame: &[f64; 9], walls: &[RWall], slabs: &[RSlab], 
         }
     }
     let mut out = Vec::new();
-    for f in crate::plan::elevation_geom::faces_full(frame, &w, &sl, &r).unwrap_or_default() {
+    for f in crate::plan::elevation_geom::faces_full_with(frame, &w, &sl, &r, all).unwrap_or_default() {
         let role = match f.role {
             0 => Role::Wall,
             1 => Role::Slab,
@@ -251,6 +256,11 @@ fn mesh_faces(frame: &[f64; 9], pos: &[f64], info: &crate::mesh_view::MeshInfo, 
 
 /// `collectRoofFaces`.
 pub(super) fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall]) -> Result<Vec<Face>, String> {
+    collect_roof_faces_with(p, frame, walls, false)
+}
+
+/// Wie [`collect_roof_faces`]; `every` = alle Dreiecke der Dachkörper, auch abgewandte ([316] Schattenwerfer).
+pub(super) fn collect_roof_faces_with(p: &Project, frame: &[f64; 9], walls: &[RWall], every: bool) -> Result<Vec<Face>, String> {
     // Giebeldreiecke nur ohne Wand darunter ([G2]): sonst zeigt die Ansicht die Giebelwand selbst.
     let reached: std::collections::HashSet<&str> = walls.iter().filter(|w| w.top_plane.is_some()).map(|w| w.wall_id.as_str()).collect();
     let floors: std::collections::HashSet<&str> = p.walls.iter().filter(|w| reached.contains(w.id.as_str())).map(|w| w.floor_id.as_str()).collect();
@@ -283,6 +293,9 @@ pub(super) fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall])
             let front = |m: &crate::solid_bool::Mesh| -> Vec<usize> {
                 (0..m.indices.len() / 3)
                     .filter(|&ti| {
+                        if every {
+                            return true;
+                        }
                         let q = |i: u32| {
                             let j = i as usize * 3;
                             [m.positions[j], m.positions[j + 1], m.positions[j + 2]]
@@ -335,7 +348,7 @@ pub(super) fn collect_roof_faces(p: &Project, frame: &[f64; 9], walls: &[RWall])
         let gables = if floors.contains(roof.floor_id.as_str()) { fascia.chain(parapet).collect() } else { g.gables.iter().cloned().chain(fascia).chain(parapet).collect() };
         roofs.push(RoofIn { id: roof.id.clone(), fill, planes: g.planes.clone(), gables });
     }
-    Ok(project_faces(frame, &[], &[], &roofs))
+    Ok(project_faces_with(frame, &[], &[], &roofs, every))
 }
 
 /// `extendWallCornersForElevation`.
