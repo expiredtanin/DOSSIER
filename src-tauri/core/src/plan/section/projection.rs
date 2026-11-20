@@ -332,12 +332,18 @@ pub(crate) struct OwnerRef {
     pub glass: bool,
     /// [279] Tafel eines Lochblechgeländers: Lochmuster (3D-Dokument).
     pub perforated: bool,
+    /// [305] Einbauteil einer Öffnung (Rahmen; mit `glass` die Scheibe): kein Wandkörper, nur im 3D-Dokument.
+    pub opening: bool,
 }
+
+/// [305] Besitzer-Nummern der Öffnungsteile in `ViewFaces::owners` (Index `usize::MAX` bzw. `- 1` der Art `Wall`).
+const OPENING_FRAME: usize = usize::MAX;
+const OPENING_GLASS: usize = usize::MAX - 1;
 
 /// [266] Alle Flächen des Modells für eine beliebige Ansicht (Vektor-Axonometrie, `plan/axo.rs`): dieselben Körper wie
 /// die Projektion des Schnitts ([`view_faces`]), ohne Zuschnitt; Bauteile ausgeblendeter Klassen entfallen ([180]),
 /// Abzugskörper ebenso (sie sind in den Wänden schon ausgespart). `meshes`: importierte Netze (Kontext) mitnehmen.
-pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64; 3]) -> [f64; 3], view_normal: &dyn Fn([f64; 3]) -> [f64; 3], meshes: bool) -> Result<(ViewFaces, Vec<OwnerRef>), String> {
+pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64; 3]) -> [f64; 3], view_normal: &dyn Fn([f64; 3]) -> [f64; 3], meshes: bool, opening_detail: Option<f64>) -> Result<(ViewFaces, Vec<OwnerRef>), String> {
     let walls_r = model3d::emit_walls_with(p, false, false)?;
     let mut slabs_r = model3d::emit_slabs(p);
     slabs_r.extend(model3d::emit_stairs(p, true));
@@ -353,13 +359,23 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
     let bodies: Vec<&BodyMesh> = all.iter().filter(|b| !is_subtract_body(p, b) && !skip(Kind::Body, b.index)).collect();
     let mut mrefs = if meshes { crate::mesh_view::meshes(p) } else { Vec::new() };
     mrefs.retain(|m| shown(&m.mesh.category_code));
-    let vf = view_faces(p, view, view_normal, false, &walls_r, &wi, &slabs_r, &bodies, &mrefs, &|_| true, &skip);
+    let mut vf = view_faces(p, view, view_normal, false, &walls_r, &wi, &slabs_r, &bodies, &mrefs, &|_| true, &skip);
+    if let Some(detail) = opening_detail {
+        // [305] Rahmen und Glas der Öffnungen: dieselben Teile wie im 3D (`emit_opening_meshes_with`), nur für Öffnungen
+        // in sichtbaren Wänden und sichtbarer Klasse. Die Scheibe verdeckt nichts (Besitzer `OPENING_GLASS`).
+        let hosts: HashSet<&str> = walls_r.iter().map(|w| w.wall_id.as_str()).collect();
+        let parts = model3d::emit_opening_meshes_with(p, detail, &|o| hosts.contains(o.host_wall_id.as_str()) && shown(&o.category_code));
+        add_opening_faces(&mut vf, &parts, view, view_normal);
+    }
     let roofs = p.roofs.as_deref().unwrap_or(&[]);
     let solids = p.extruded_solids.as_deref().unwrap_or(&[]);
     let refs = vf
         .owners
         .iter()
         .map(|&(kind, i)| {
+            if kind == Kind::Wall && (i == OPENING_FRAME || i == OPENING_GLASS) {
+                return OwnerRef { kind, id: None, stair: false, column: false, railing: false, glass: i == OPENING_GLASS, perforated: false, opening: true };
+            }
             let (id, stair, column, railing) = match kind {
                 Kind::Wall => (walls_r.get(i).map(|w| w.wall_id.clone()), false, false, false),
                 Kind::Slab => match slabs.get(i) {
@@ -376,8 +392,74 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
             };
             let glass = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(_, Some(RailingKind::Glass))));
             let perforated = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(_, Some(RailingKind::Perforated))));
-            OwnerRef { kind, id, stair, column, railing, glass, perforated }
+            OwnerRef { kind, id, stair, column, railing, glass, perforated, opening: false }
         })
         .collect();
     Ok((vf, refs))
+}
+
+/// [305] Die Einbauteile der Öffnungen (Netze in Modellkoordinaten x, y, Höhe) als Ansichtsflächen anhängen: Rahmen
+/// deckend, Glas (Farbe `PART_RGB[0]`) nicht deckend. Gegenüberliegende Dreieckspaare einer Ebene werden zu einem Viereck
+/// (keine Diagonalen als Kanten); Netze mit Knickwinkel (Formöffnungen) bilden je eine Glättungsgruppe.
+fn add_opening_faces(vf: &mut ViewFaces, parts: &[model3d::RMesh], view: &dyn Fn([f64; 3]) -> [f64; 3], view_normal: &dyn Fn([f64; 3]) -> [f64; 3]) {
+    use crate::hlr;
+    let glass_rgb = crate::model3d::PART_RGB[0];
+    let mut owner_of: [Option<u32>; 2] = [None, None];
+    let mut group = u32::MAX / 2;
+    for m in parts {
+        let g = usize::from(m.color == glass_rgb);
+        let smooth = if m.crease_angle.is_some() {
+            group += 1;
+            group
+        } else {
+            0
+        };
+        let q = |i: u32| -> Option<[f64; 3]> {
+            let j = 3 * i as usize;
+            Some([*m.positions.get(j)?, *m.positions.get(j + 2)?, *m.positions.get(j + 1)?])
+        };
+        let tris: Vec<[u32; 3]> = m.indices.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect();
+        let mut k = 0;
+        while k < tris.len() {
+            let t = tris[k];
+            let Some(pts) = t.iter().map(|&i| q(i)).collect::<Option<Vec<_>>>() else {
+                k += 1;
+                continue;
+            };
+            let nm = |a: [f64; 3], b: [f64; 3], c: [f64; 3]| {
+                let (u, v) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
+                [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]]
+            };
+            let n = nm(pts[0], pts[1], pts[2]);
+            let len = crate::jsmath::hypot(&n);
+            if !(len > 1e-12) {
+                k += 1;
+                continue;
+            }
+            // Folgedreieck (a, c, d) mit gleicher Ebene → Viereck (a, b, c, d).
+            let mut poly = pts.clone();
+            let mut step = 1;
+            if let Some(t2) = tris.get(k + 1).filter(|t2| t2[0] == t[0] && t2[1] == t[2]) {
+                if let Some(d) = q(t2[2]) {
+                    let n2 = nm(pts[0], pts[2], d);
+                    let l2 = crate::jsmath::hypot(&n2);
+                    if l2 > 1e-12 && (0..3).all(|a| (n[a] / len - n2[a] / l2).abs() < 1e-9) {
+                        poly.push(d);
+                        step = 2;
+                    }
+                }
+            }
+            k += step;
+            // Achsentausch (x, y, Höhe) → Welt (x, Höhe, y) spiegelt: Normale umkehren, damit sie aussen bleibt.
+            let normal = [-n[0] / len, -n[1] / len, -n[2] / len];
+            let slot = &mut owner_of[g];
+            let owner = *slot.get_or_insert_with(|| {
+                vf.owners.push((Kind::Wall, if g == 1 { OPENING_GLASS } else { OPENING_FRAME }));
+                vf.owners.len() as u32 - 1
+            });
+            let mut f = hlr::Face::new(poly.iter().map(|&w| view(w)).collect(), view_normal(normal), owner);
+            f.smooth = smooth;
+            vf.faces.push(f);
+        }
+    }
 }

@@ -266,7 +266,7 @@ fn axo_zeit() {
     let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let a = args(serde_json::json!({"view": "southeast"}), &p);
     let t = std::time::Instant::now();
-    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false).unwrap().unwrap();
+    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, 100.0).unwrap().unwrap();
     eprintln!("Flächen: {} in {:?}", prep.faces.len(), t.elapsed());
     let t = std::time::Instant::now();
     let segs = hlr::hidden_lines(&prep.faces, &hlr::Opts { tol: 1e-4, depth_eps: 1e-4, hidden: false, ..hlr::Opts::default() });
@@ -372,4 +372,35 @@ fn baeume_im_3d_dokument() {
         let n0 = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "projection": kind, "hasVis": true, "invisible": ["13"]}))).len();
         assert!(n1 > n0 + 10, "{kind}: {n0} -> {n1}");
     }
+}
+
+/// [305] Fenster im 3D-Dokument: Rahmen (deckend) und Glas (nicht deckend, hell getönt; ihre Kanten fein, soweit der Rahmen sie nicht deckt) aus denselben
+/// Teilen wie das 3D (`emit_opening_meshes`); ab 1:200 nur Rahmenring und Glas (weniger Flächen als bei 1:100);
+/// die Klasse der Öffnung schaltet beides ab.
+#[test]
+fn fenster_mit_rahmen_und_glas() {
+    let p: Project = serde_json::from_str(include_str!("../../tests/fixtures/robust/wettbewerb.json")).unwrap();
+    let a = args(serde_json::json!({"view": "southeast"}), &p);
+    let parts = |scale: f64| {
+        let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, scale).unwrap().expect("Flächen");
+        let n = |glass: bool| prep.faces.iter().filter(|f| refs.get(f.owner as usize).is_some_and(|r| r.opening && r.glass == glass)).count();
+        (n(false), n(true))
+    };
+    let (rahmen100, glas100) = parts(100.0);
+    let (rahmen200, glas200) = parts(200.0);
+    assert!(rahmen200 > 0 && glas200 > 0, "Rahmen {rahmen200}, Glas {glas200} bei 1:200");
+    assert!(rahmen100 > rahmen200, "1:100 mit Flügel-Detail: {rahmen100} > {rahmen200}");
+    assert_eq!(glas100, glas200, "Glas in jedem Massstab");
+    // Glas hell getönt mit Deckkraft.
+    let (prims, _) = axo_primitives(&p, &a, false).unwrap().expect("Bild");
+    let glass: Vec<&Primitive> = prims.iter().filter(|q| matches!(q, Primitive::Polygon { fill, .. } if fill == WINDOW_GLASS_FILL)).collect();
+    assert!(!glass.is_empty(), "Glasflächen im Bild");
+    assert!(glass.iter().all(|q| matches!(q, Primitive::Polygon { opacity: Some(o), .. } if *o < 1.0)));
+    // Klasse aller Öffnungen aus: weder Rahmen noch Glas.
+    let mut codes: Vec<String> = p.openings.as_deref().unwrap().iter().map(|o| o.category_code.clone()).collect();
+    codes.sort();
+    codes.dedup();
+    let off = args(serde_json::json!({"view": "southeast", "hasVis": true, "invisible": codes}), &p);
+    let (prep, refs) = prepare(&p, &off.proj, &off.vis, false, 100.0).unwrap().expect("Flächen");
+    assert!(prep.faces.iter().all(|f| !refs.get(f.owner as usize).is_some_and(|r| r.opening)));
 }

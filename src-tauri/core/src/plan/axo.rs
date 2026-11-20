@@ -286,7 +286,7 @@ fn perspective_pass(faces: Vec<hlr::Face>, model_n: Vec<V3>, zref: f64, tan_half
 }
 
 /// Flächen des Modells in der Projektion; `None`, wenn die Projektion entartet ist.
-fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool) -> Result<Option<(Prepared, Vec<OwnerRef>)>, String> {
+fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, scale: f64) -> Result<Option<(Prepared, Vec<OwnerRef>)>, String> {
     match *proj {
         Projection::Parallel { m, o } => {
             let Some(cof) = cofactor(&m) else { return Ok(None) };
@@ -307,9 +307,9 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool) -> R
                 Some(q) => (q, true),
                 None => (p, context && ortho),
             };
-            let (mut vf, refs) = super::section::model_view_faces(pp, vis, &view, &view_n, meshes)?;
+            let (mut vf, refs) = super::section::model_view_faces(pp, vis, &view, &view_n, meshes, Some(opening_detail(scale)))?;
             if vf.faces.len() > FACE_BUDGET && (context || ent.is_some()) {
-                (vf, _) = super::section::model_view_faces(p, vis, &view, &view_n, false)?;
+                (vf, _) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
             // Modell-Normale = Mᵀ · Normale (die Normale ging über M⁻ᵀ).
             let model_n = vf.faces.iter().map(|f| unit([0, 1, 2].map(|k| m[0][k] * f.normal[0] + m[1][k] * f.normal[1] + m[2][k] * f.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
@@ -329,9 +329,9 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool) -> R
                 Some(q) => (q, true),
                 None => (p, context),
             };
-            let (mut vf, refs) = super::section::model_view_faces(pp, vis, &view, &view_n, meshes)?;
+            let (mut vf, refs) = super::section::model_view_faces(pp, vis, &view, &view_n, meshes, Some(opening_detail(scale)))?;
             if vf.faces.len() > FACE_BUDGET && (context || ent.is_some()) {
-                (vf, _) = super::section::model_view_faces(p, vis, &view, &view_n, false)?;
+                (vf, _) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
             let model_n: Vec<V3> = vf.faces.iter().map(|q| unit([0, 1, 2].map(|k| r[k] * q.normal[0] + u[k] * q.normal[1] + f[k] * q.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
             Ok(Some((perspective_pass(vf.faces, model_n, zref, tan_half, aspect), refs)))
@@ -600,6 +600,9 @@ fn simplify(ring: &[[f64; 2]]) -> Vec<[f64; 2]> {
 
 /// Füllung des Glasgeländers (hell, mit Deckkraft über den Flächen dahinter).
 const GLASS_FILL: &str = "#cfd6dc";
+/// [305] Fensterglas: heller, leicht bläulich getönt; Kanten fein.
+const WINDOW_GLASS_FILL: &str = "#c6d6e0";
+const GLASS_EDGE_MM: f64 = 0.09;
 
 fn grey_hex(g: f64) -> String {
     let v = (g.clamp(0.0, 1.0) * 255.0).round() as u32;
@@ -613,6 +616,20 @@ pub struct AxoArgs {
     pub opts: AxoOpts,
     pub context: bool,
     pub vis: Visibility,
+    /// Zeichenmassstab (Nenner) für den Detailgrad der Öffnungen ([305]); die Abfrage `axoPlan` setzt ihn.
+    pub scale: f64,
+}
+
+/// [305] Detailgrad der Öffnungsteile nach Massstab (`emit_opening_meshes`: 1 mittel, 2 fein, 3 nur Rahmenring und
+/// Glas): ab 1:200 ohne Flügel-Detail.
+fn opening_detail(scale: f64) -> f64 {
+    if scale >= 200.0 {
+        3.0
+    } else if scale >= 50.0 {
+        1.0
+    } else {
+        2.0
+    }
 }
 
 /// Modellmitte (Hüllbox der Bauteile) für die Bildebene der Perspektive.
@@ -653,7 +670,7 @@ impl AxoArgs {
             None if !s("cameraId").is_empty() => project_camera(p, s("cameraId"), aspect, center)?,
             None => preset(s("view"), if s("projection").is_empty() { "iso" } else { s("projection") })?,
         };
-        Some(AxoArgs { proj, opts: AxoOpts { hidden: b("hidden", false) || b("hiddenLines", false), fills: b("fills", true) }, context: b("context", false), vis: Visibility::from_json(v) })
+        Some(AxoArgs { proj, opts: AxoOpts { hidden: b("hidden", false) || b("hiddenLines", false), fills: b("fills", true) }, context: b("context", false), vis: Visibility::from_json(v), scale: 100.0 })
     }
 }
 
@@ -677,7 +694,7 @@ pub fn snapshot_text(p: &Project, snap: &ViewSnapshot, invisible: &[String]) -> 
 
 /// Plan-Primitive der Axonometrie und ihr Ausmass; `None` ohne sichtbares Bauteil.
 pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
-    let Some((mut prep, refs)) = prepare(p, &a.proj, &a.vis, a.context)? else { return Ok(None) };
+    let Some((mut prep, refs)) = prepare(p, &a.proj, &a.vis, a.context, a.scale)? else { return Ok(None) };
     // [279] Glas der Glasgeländer verdeckt nichts (Linien und Flächen dahinter bleiben sichtbar).
     for f in &mut prep.faces {
         f.occludes = !refs.get(f.owner as usize).is_some_and(|r| r.glass);
@@ -692,9 +709,10 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
     let owner = |o: u32| refs.get(o as usize);
     // Glas ([279]) zuletzt und durchscheinend, damit Flächen dahinter durchschimmern.
     let is_glass = |o: u32| refs.get(o as usize).is_some_and(|r| r.glass);
+    let is_window = |o: u32| refs.get(o as usize).is_some_and(|r| r.opening);
     let ordered = out.fills.iter().filter(|f| !is_glass(f.2)).chain(out.fills.iter().filter(|f| is_glass(f.2)));
     for (polys, g, o) in ordered {
-        let fill = if is_glass(*o) { GLASS_FILL.to_string() } else { grey_hex(*g) };
+        let fill = if is_window(*o) && is_glass(*o) { WINDOW_GLASS_FILL.to_string() } else if is_glass(*o) { GLASS_FILL.to_string() } else { grey_hex(*g) };
         for poly in polys {
             let ring = simplify(&if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() });
             if ring.len() < 3 {
@@ -737,9 +755,14 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
         prims.push(l);
     }
     for pass in [false, true] {
-        for (a, b, _, outline) in out.edges.iter().filter(|e| e.3 == pass) {
+        for (a, b, o, outline) in out.edges.iter().filter(|e| e.3 == pass) {
             acc.add(a[0], a[1]);
             acc.add(b[0], b[1]);
+            // [305] Kanten der Fensterscheibe fein.
+            if is_window(*o) && is_glass(*o) {
+                prims.push(line(v2(a[0], a[1]), v2(b[0], b[1]), "axo-edge", GLASS_EDGE_MM, EDGE_INK));
+                continue;
+            }
             prims.push(if *outline { line(v2(a[0], a[1]), v2(b[0], b[1]), "axo-outline", OUTLINE_MM, OUTLINE_INK) } else { line(v2(a[0], a[1]), v2(b[0], b[1]), "axo-edge", EDGE_MM, EDGE_INK) });
         }
     }
@@ -764,7 +787,8 @@ pub fn axo_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>, St
     let ren = crate::renovation::View::editing(ren, p, crate::design_options::parse_edit(p, v.get("designOptionEdit"))).map(|r| r.resolve(p));
     let filtered = ren.as_ref().and_then(|r| r.project(p));
     let p = filtered.as_ref().unwrap_or(p);
-    let Some(a) = AxoArgs::parse(p, &v) else { return Ok(w.finish()) };
+    let Some(mut a) = AxoArgs::parse(p, &v) else { return Ok(w.finish()) };
+    a.scale = scale;
     if let Some((mut prims, bounds)) = axo_primitives(p, &a, mono)? {
         if let Some(r) = ren.as_ref().filter(|r| !r.styled.is_empty() || !r.faces.is_empty()) {
             for q in prims.iter_mut() {
