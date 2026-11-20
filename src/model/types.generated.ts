@@ -2588,6 +2588,8 @@ export type ModelViewElevation = {
   shadows?: boolean;
   /** Ansichtsschraffur der Baustoffe (Basis: ja). */
   materialHatch?: boolean;
+  /** [316] Licht der Schlagschatten (Basis: Zeichenregel 45°). */
+  shadowLight?: ModelViewShadowLight;
 };
 
 /** [173] Handlauf im Grundriss: aus, einfache Linie (Achse) oder doppelte (Rohrkanten). */
@@ -2685,6 +2687,12 @@ export type ModelViewSectionMarks = {
   /** Beschriftung der Marke. */
   markerLabel?: boolean;
 };
+
+/**
+ * [316] Licht der Schlagschatten in der Ansicht: Zeichenregel 45° von links vorn oben (relativ zur Blickrichtung)
+ * oder Sonnenstand der Schattenstudie.
+ */
+export type ModelViewShadowLight = "conventional" | "sun";
 
 /** [173] Gelände in der Modelldarstellung. */
 export type ModelViewSite = {

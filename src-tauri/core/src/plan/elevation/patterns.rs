@@ -205,3 +205,70 @@ fn plane_triangles(faces: &[Face], id: &str, n: [f64; 3], plane: &[[f64; 3]], pr
     }
     out
 }
+
+/// [316] Materialfugen: gemeinsame Kanten bündiger Wandflächen (gleiche Ebene) mit verschiedenem Fassadenmaterial
+/// (Baustoff der sichtbaren Wandseite, ohne Baustoff die Ansichtsfarbe) — z. B. Holz über Putz an der
+/// Geschossgrenze. Die Kantenberechnung ([G4]) lässt bündige Fugen weg; gleiches Material über die Geschossgrenze
+/// bleibt ohne Linie. Ergebnis: Endpunkte, Tiefe (vorderste der beiden Flächen) und die beiden Flächen (Index in
+/// `faces`), auf deren sichtbare Teile die Linie beschnitten wird.
+pub(super) fn material_seams(p: &Project, faces: &[Face]) -> Vec<(Pt, Pt, f64, [usize; 2])> {
+    const TOL: f64 = 1e-4;
+    let walls: HashMap<&str, &Wall> = p.walls.iter().rev().map(|w| (w.id.as_str(), w)).collect();
+    // Je Wandfläche: Material, Ebene (Tiefe = a + b·u + c·v) und Hüllrechteck.
+    let mut cand: Vec<(usize, String, [f64; 3], [f64; 4])> = Vec::new();
+    for (fi, f) in faces.iter().enumerate() {
+        if f.role != Role::Wall || f.id.is_empty() || f.pts.len() < 3 || f.pd.len() != f.pts.len() {
+            continue;
+        }
+        let key = walls.get(f.id.as_str()).and_then(|w| wall_side_component(p, w, f.normal)).map_or_else(|| rgb_to_hex(f.fill), |c| format!("c:{}", c.id));
+        let pts3: Vec<[f64; 3]> = f.pts.iter().zip(&f.pd).map(|(q, d)| [q[0], q[1], *d]).collect();
+        let Some(pl) = crate::hlr_fill::plane(&pts3) else { continue };
+        let b = f.pts.iter().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].max(q[0]), b[2].min(q[1]), b[3].max(q[1])]);
+        cand.push((fi, key, pl, b));
+    }
+    let mut out = Vec::new();
+    for i in 0..cand.len() {
+        for j in i + 1..cand.len() {
+            let ((fi, ki, pi, bi), (fj, kj, pj, bj)) = (&cand[i], &cand[j]);
+            if ki == kj || bi[0] > bj[1] + TOL || bj[0] > bi[1] + TOL || bi[2] > bj[3] + TOL || bj[2] > bi[3] + TOL {
+                continue;
+            }
+            // Bündig: gleiche Neigung und Tiefe.
+            if (pi[1] - pj[1]).abs() > 1e-3 || (pi[2] - pj[2]).abs() > 1e-3 {
+                continue;
+            }
+            let (a, b) = (&faces[*fi].pts, &faces[*fj].pts);
+            for k in 0..a.len() {
+                let (p0, p1) = (a[k], a[(k + 1) % a.len()]);
+                let (dx, dy) = (p1[0] - p0[0], p1[1] - p0[1]);
+                let len = hypot2(dx, dy);
+                if len < TOL {
+                    continue;
+                }
+                let (ex, ey) = (dx / len, dy / len);
+                for m in 0..b.len() {
+                    let (q0, q1) = (b[m], b[(m + 1) % b.len()]);
+                    // Beide Enden auf der Geraden von p0 → p1.
+                    let off = |q: Pt| ((q[0] - p0[0]) * -ey + (q[1] - p0[1]) * ex).abs();
+                    if off(q0) > TOL || off(q1) > TOL {
+                        continue;
+                    }
+                    let s = |q: Pt| (q[0] - p0[0]) * ex + (q[1] - p0[1]) * ey;
+                    let (s0, s1) = (s(q0).min(s(q1)).max(0.0), s(q0).max(s(q1)).min(len));
+                    if s1 - s0 < 10.0 * TOL {
+                        continue;
+                    }
+                    let at = |t: f64| [p0[0] + ex * t, p0[1] + ey * t];
+                    let mid = at((s0 + s1) / 2.0);
+                    // Tiefe der Fuge auf beiden Ebenen gleich (bündig).
+                    let (di, dj) = (pi[0] + pi[1] * mid[0] + pi[2] * mid[1], pj[0] + pj[1] * mid[0] + pj[2] * mid[1]);
+                    if (di - dj).abs() > 1e-3 {
+                        continue;
+                    }
+                    out.push((at(s0), at(s1), di.min(dj), [*fi, *fj]));
+                }
+            }
+        }
+    }
+    out
+}

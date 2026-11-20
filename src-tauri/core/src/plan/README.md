@@ -68,11 +68,12 @@ Herkunft, kein Wegweiser.
 | `elevation/mesh_cull.rs` | importierte Netze: Dreiecke vereinigen, verdeckte Flächen über ein Raster weglassen |
 | `elevation/openings.rs` | Fenster und Türen: Verglasung, Flügel, Rahmen, Leibungsschatten, Flächenöffnungen |
 | `elevation/silhouette.rs` | Silhouette, Kanten mit exakter Verdeckung, Geländekante |
-| `elevation/patterns.rs` | Oberflächenmuster auf Ansichtsflächen |
+| `elevation/patterns.rs` | Oberflächenmuster auf Ansichtsflächen, Materialfugen ([316]) |
+| `elevation/sun.rs` | Schlagschatten und Eigenschatten aus dem Sonnenstand der Schattenstudie ([316]) |
 | `elevation/tests.rs` | Tests der Ansicht |
 | `axo.rs` | [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten (Flächen aus `section::model_view_faces`, `hlr.rs`, Tönung über `hlr_fill.rs`), Vorgaben, Kamera, Abfrage `axo_plan_buf()`; Tests `axo_tests.rs` |
 | `axo_terrain.rs` | [307] Gelände im 3D-Dokument: Netz aus `excavation::terrain_model_mesh` als Flächen (Ausschnitt um das Gebäude, Raster bei zu dichten Netzen), Kanten nur am Rand |
-| `elevation_geom.rs` | Geometrie der Ansicht: Verdeckung, Schlagschatten, Eck-Verlängerung, Öffnungen |
+| `elevation_geom.rs` | Geometrie der Ansicht: Verdeckung, Flächen, Eck-Verlängerung, Öffnungen |
 | `grid_view.rs` | Achsraster in Schnitt und Ansicht |
 | `underlay.rs` | Grundriss ausgerichtet unter Schnitt und Ansicht (Ausrichtung der Pausfolie „Grundriss hinter Schnitt“) |
 | `trace.rs` | Pausfolie ([205], Abfrage `tracePlan`): Teil-Abfragen der Quelle ausrichten (Schnitt an der Linie aufgeklappt, Grundriss unter dem Schnitt), verschieben/drehen, ohne Auswahl-Ids, gefärbt |

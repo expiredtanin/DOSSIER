@@ -303,6 +303,8 @@ pub struct ElevOpts {
     pub shadows_mv: Option<bool>,
     /// Ansichtsschraffur der Baustoffe.
     pub material_hatch: bool,
+    /// [316] Schlagschatten aus dem Sonnenstand der Schattenstudie (sonst Zeichenregel 45°).
+    pub sun_light: bool,
 }
 
 /// Schichten einer geschnittenen Wand.
@@ -569,7 +571,7 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             Some(ModelViewCutFill::Empty) => Some(CutFill::Empty),
             _ => None,
         },
-        elevation: ElevOpts { shadows_mv: el.and_then(|e| e.shadows), material_hatch: el.and_then(|e| e.material_hatch).unwrap_or(true) },
+        elevation: ElevOpts { shadows_mv: el.and_then(|e| e.shadows), material_hatch: el.and_then(|e| e.material_hatch).unwrap_or(true), sun_light: el.and_then(|e| e.shadow_light) == Some(crate::model::ModelViewShadowLight::Sun) },
         floor_finish_mv: mv.and_then(|m| m.slabs.as_ref()).and_then(|s| s.floor_finish).filter(|f| *f != FloorFinishDisplay::Unknown),
         terrain_mv: mv.and_then(|m| m.site.as_ref()).and_then(|s| s.terrain),
         section_marks_mv: mv.and_then(|m| m.section_marks.clone()),
