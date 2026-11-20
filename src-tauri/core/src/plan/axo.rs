@@ -293,7 +293,9 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
             let Some(cof) = cofactor(&m) else { return Ok(None) };
             // Schiefe Projektion: Netz-Normalen (`mesh_view::hlr_faces`) setzen eine längentreue Abbildung voraus.
             let ortho = (0..3).all(|i| (0..3).all(|j| (dot(m[i], m[j]) - if i == j { 1.0 } else { 0.0 }).abs() < 1e-9));
+            let low = std::cell::Cell::new(f64::INFINITY);
             let view = |w: V3| {
+                low.set(low.get().min(w[1]));
                 let q = sub(model_of(w), o);
                 [dot(m[0], q), dot(m[1], q), dot(m[2], q)]
             };
@@ -313,14 +315,16 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
                 (vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
             if let Some(clip) = terrain {
-                super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, &mut vf, &mut refs);
+                super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, low.get(), &mut vf, &mut refs);
             }
             // Modell-Normale = Mᵀ · Normale (die Normale ging über M⁻ᵀ).
             let model_n = vf.faces.iter().map(|f| unit([0, 1, 2].map(|k| m[0][k] * f.normal[0] + m[1][k] * f.normal[1] + m[2][k] * f.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
             Ok(Some((Prepared { faces: vf.faces, model_n }, refs)))
         }
         Projection::Perspective { eye, r, u, f, zref, tan_half, aspect } => {
+            let low = std::cell::Cell::new(f64::INFINITY);
             let view = |w: V3| {
+                low.set(low.get().min(w[1]));
                 let q = sub(model_of(w), eye);
                 [dot(r, q), dot(u, q), dot(f, q)]
             };
@@ -338,7 +342,7 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
                 (vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
             if let Some(clip) = terrain {
-                super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, &mut vf, &mut refs);
+                super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, low.get(), &mut vf, &mut refs);
             }
             let model_n: Vec<V3> = vf.faces.iter().map(|q| unit([0, 1, 2].map(|k| r[k] * q.normal[0] + u[k] * q.normal[1] + f[k] * q.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
             Ok(Some((perspective_pass(vf.faces, model_n, zref, tan_half, aspect), refs)))

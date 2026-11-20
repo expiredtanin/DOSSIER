@@ -500,3 +500,79 @@ fn gelaende_auf_parzelle_zugeschnitten_mit_sockel() {
     let n_side = |v: serde_json::Value| terrain_fills(&extent(&p, v).0);
     assert!(n_side(serde_json::json!({"view": "southeast"})) > n_side(serde_json::json!({"view": "southeast", "terrainClip": "none"})));
 }
+
+/// [309] Gelände als Raster `nx × ny` Zellen (2·nx·ny Dreiecke) über [x0, x1] × [y0, y1], Höhe 0.1·x.
+fn grid_terrain(x: (f64, f64), y: (f64, f64), nx: usize, ny: usize) -> TerrainMesh {
+    let (mut pos, mut idx) = (Vec::new(), Vec::new());
+    for j in 0..=ny {
+        for i in 0..=nx {
+            let (px, py) = (x.0 + (x.1 - x.0) * i as f64 / nx as f64, y.0 + (y.1 - y.0) * j as f64 / ny as f64);
+            pos.extend([px, py, 0.1 * px]);
+        }
+    }
+    for j in 0..ny {
+        for i in 0..nx {
+            let a = (j * (nx + 1) + i) as f64;
+            let b = a + 1.0;
+            let c = a + (nx + 1) as f64;
+            idx.extend([a, b, c + 1.0, a, c + 1.0, c]);
+        }
+    }
+    TerrainMesh { id: "t".into(), category_code: "02".into(), positions: pos, indices: idx, ..Default::default() }
+}
+
+fn parcel_project(t: TerrainMesh, parcel: serde_json::Value, walls: bool) -> Project {
+    let mut p = cubes(&[(0.0, 0.0, 0.0)]);
+    if !walls {
+        p.walls.clear();
+        p.drawing_levels.clear();
+    }
+    p.context = Some(vec![ContextObject::TerrainMesh(t)]);
+    p.layers.push(serde_json::from_value(serde_json::json!({"code": "02", "name": "Gelände", "color": "#000", "lw": 0.5, "visible": true, "locked": false})).unwrap());
+    p.site_rules = serde_json::from_value(serde_json::json!({"parcel": parcel, "defaultSetback": 3.0})).ok();
+    p
+}
+
+/// [309] Dichtes Netz (> 12 000 Dreiecke), das die schiefe Parzelle + 2 m nicht ganz deckt: der Sockelrand ist ein
+/// sauberer Umriss mit vier Ecken (kein Treppenrand), Kanten oben, unten und senkrecht zusammengefasst.
+#[test]
+fn sockelrand_gerade_bei_dichtem_netz_und_schiefer_parzelle() {
+    let parcel = serde_json::json!([{"x": -10.0, "y": -8.0}, {"x": 12.0, "y": -10.0}, {"x": 14.0, "y": 10.0}, {"x": -9.0, "y": 12.0}]);
+    // Netz y −20 … 4 m: deckt die Parzelle + 2 m im Norden (bis 14 m) nicht; 2 · 120 · 50 = 12 000 + Dreiecke.
+    let p = parcel_project(grid_terrain((-30.0, 30.0), (-20.0, 4.0), 130, 60), parcel, false);
+    let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast"})));
+    // Oben 4 + unten 4 + senkrechte Ecken höchstens 4 (verdeckte entfallen).
+    assert!(l.len() <= 12, "Sockelrand gezackt: {} Linien: {l:?}", l.len());
+    assert!(l.len() >= 8, "{}", l.len());
+}
+
+/// [309] Konkave Parzelle (L-Form): Zuschnitt folgt dem Umriss (sechs Ecken, nicht die Rechteck-Hülle).
+#[test]
+fn zuschnitt_auf_konkaven_parzellenumriss() {
+    let l_shape = serde_json::json!([{"x": -10.0, "y": -10.0}, {"x": 10.0, "y": -10.0}, {"x": 10.0, "y": 0.0}, {"x": 0.0, "y": 0.0}, {"x": 0.0, "y": 10.0}, {"x": -10.0, "y": 10.0}]);
+    let p = parcel_project(grid_terrain((-30.0, 30.0), (-30.0, 30.0), 12, 12), l_shape, false);
+    let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast"})));
+    // Aufsicht ist nicht nötig: ohne Aufsicht gilt die Obergrenze 6 oben + 6 unten + 6 senkrecht.
+    assert!(l.len() <= 18, "{}", l.len());
+    // Fläche des Zuschnitts: L (300 m²) + 2 m Rand, deutlich kleiner als die Hülle (24 × 24 = 576 m²).
+    let a = crate::plan::axo_terrain::clip_area_for_test(&p).expect("Fläche");
+    assert!(a > 300.0 && a < 480.0, "{a}");
+}
+
+/// [309] Keller unter dem Gelände: Sockel-Unterkante mindestens 0.5 m unter dem tiefsten Bauteil.
+#[test]
+fn sockel_unter_dem_tiefsten_bauteil() {
+    let parcel = serde_json::json!([{"x": -5.0, "y": -5.0}, {"x": 6.0, "y": -5.0}, {"x": 6.0, "y": 6.0}, {"x": -5.0, "y": 6.0}]);
+    let t = || TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![-30.0, -30.0, 0.0, 30.0, -30.0, 0.0, 30.0, 30.0, 0.0, -30.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+    let mut p = parcel_project(t(), parcel.clone(), true);
+    p.drawing_levels[0].base_elevation = Some(-6.0);
+    let h = |p: &Project| {
+        let a = args(serde_json::json!({"view": "southeast"}), p);
+        let b = axo_primitives(p, &a, false).unwrap().unwrap().1;
+        b[3] - b[1]
+    };
+    let mut q = parcel_project(t(), parcel, true);
+    q.drawing_levels[0].base_elevation = Some(-0.2);
+    // Bauteil bei −6: Unterkante −6.5 statt −1. Bild höher um ≈ 5.5 m · Höhenmassstab (Isometrie ≈ 0.82).
+    assert!(h(&p) - h(&q) > 4.0, "{} vs {}", h(&p), h(&q));
+}
