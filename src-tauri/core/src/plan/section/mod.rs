@@ -768,7 +768,7 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     meshes.retain(|m| shown(&m.mesh.category_code));
     // [311] Entourage mit 3D-Netz: wie importierte Netze (Ansichtskanten mit Verdeckung, Schnittlinie), hinten angehängt.
     let n_ctx = meshes.len();
-    let ent = if vis.entourage_meshes { crate::furniture_3d::imported_meshes(p) } else { Vec::new() };
+    let ent = if vis.entourage_meshes { crate::furniture_3d::imported_meshes_where(p, &|l| !crate::furniture_3d::is_person(l)) } else { Vec::new() };
     meshes.extend(ent.iter().filter(|m| shown(&m.category_code)).filter_map(|m| Some(crate::mesh_view::MeshRef { index: usize::MAX, mesh: m, info: crate::mesh_view::info(m)? })));
     let mut mesh_lines = Vec::new();
     append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);

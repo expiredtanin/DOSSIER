@@ -238,13 +238,21 @@ pub(crate) fn view_faces(p: &Project, view: &dyn Fn([f64; 3]) -> [f64; 3], view_
         owners.push((Kind::Mesh, k));
         let owner = owners.len() as u32 - 1;
         // Netz (x, y, Höhe) → Welt (x, Höhe, y); Normalen über die Kofaktor-Abbildung der Ansicht (auch schiefe Projektionen).
+        let from = faces.len();
         crate::mesh_view::hlr_faces_n(m, &|q| view([q[0], q[2], q[1]]), Some(&|n| view_normal([n[0], n[2], n[1]])), owner, group, clip, &mut faces);
+        // [312] Entourage (grobe Netze der Bibliothek, `index` = MAX): Fugen unter 35° fallen weg, nur Silhouette und echte Knicke.
+        if m.index == usize::MAX {
+            faces[from..].iter_mut().for_each(|f| f.crease_deg = Some(ENTOURAGE_CREASE_DEG));
+        }
         group += 1;
     }
     // [180] Bauteile ausgeblendeter Klassen: weder Kanten noch Verdecker.
     faces.retain(|f| owners.get(f.owner as usize).is_none_or(|&(k, i)| !skip(k, i)));
     ViewFaces { faces, owners, rail_owners }
 }
+
+/// [312] Knickwinkel (Grad), ab dem Kanten der Entourage-Netze im Schnitt gezeichnet werden.
+pub(crate) const ENTOURAGE_CREASE_DEG: f64 = 35.0;
 
 /// Ansichtskanten hinter der Schnittebene mit exakter Sichtbarkeit ([G4], `hlr.rs`; verdeckte nur mit
 /// `hidden`, wie `hiddenLines` der Ebene): die Körper als

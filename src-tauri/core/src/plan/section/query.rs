@@ -172,7 +172,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
         .iter()
         .flat_map(|(l, s)| {
             let trees = crate::plan::trees::view_trees(p, l, &vis, None, Some(mono), ren.as_ref());
-            let ent = if vis.entourage_meshes { Vec::new() } else { crate::plan::entourage::view_entourage(p, l, &vis, false, mono) };
+            let ent = crate::plan::entourage::view_entourage(p, l, &vis, false, mono);
             trees.into_iter().chain(ent).map(move |(d, t)| (d, unfold::keep_group(t, s.as_ref())))
         })
         .collect();

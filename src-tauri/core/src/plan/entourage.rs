@@ -38,6 +38,10 @@ pub fn view_entourage(p: &Project, level: &LevelSpec, vis: &Visibility, filled: 
             continue;
         }
         let greyed = Some(vis.has_display && vis.greyed(&d.category_code));
+        // [312] Schnitt mit Netzkanten (`vis.entourage_meshes`): Möbel nur als Pick-Fläche (Kanten kommen aus der Projektion),
+        // Personen als eine Silhouette (Vereinigung der Teile, keine inneren Kanten).
+        let person = matches!(&d.geom, Drawing2DGeom::Libobj { lib_id, .. } if crate::furniture_3d::is_person(lib_id));
+        let edges = !filled && vis.entourage_meshes && !person;
         let mut shapes: Vec<(f64, Vec<Vec2>, String)> = Vec::new();
         let (mut dsum, mut dn) = (0.0, 0usize);
         let (mut dmin, mut dmax) = (f64::INFINITY, f64::NEG_INFINITY);
@@ -66,10 +70,18 @@ pub fn view_entourage(p: &Project, level: &LevelSpec, vis: &Visibility, filled: 
         }
         // Ferne Teile zuerst (Maler-Reihenfolge innerhalb des Objekts).
         shapes.sort_by(|a, b| b.0.total_cmp(&a.0));
+        if person && !filled {
+            let polys: Vec<crate::flat::Polygon> = shapes.iter().map(|s| vec![s.1.iter().map(|q| [q.x, q.y]).collect()]).collect();
+            let mean = shapes.iter().map(|s| s.0).sum::<f64>() / shapes.len().max(1) as f64;
+            let merged = crate::polygon_bool::union(&polys);
+            if !merged.is_empty() {
+                shapes = merged.into_iter().filter_map(|pg| pg.into_iter().next()).map(|r| (mean, r.iter().map(|q| Vec2 { x: q[0], y: q[1] }).collect(), "none".to_string())).collect();
+            }
+        }
         let prims = shapes
             .into_iter()
             .map(|(_, pts, fill)| {
-                let mut q = super::trees::poly(pts, &fill, VIEW_INK, VIEW_MM, None, greyed);
+                let mut q = super::trees::poly(pts, &fill, if edges { "none" } else { VIEW_INK }, if edges { 0.0 } else { VIEW_MM }, None, greyed);
                 if let Primitive::Polygon { drawing_id, .. } = &mut q {
                     *drawing_id = Some(d.id.clone());
                 }

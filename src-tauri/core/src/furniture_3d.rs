@@ -351,10 +351,23 @@ pub fn placed(p: &Project) -> Vec<(usize, Vec<Mesh3>)> {
 
 /// [311] Die Teilnetze der Entourage als `ImportedMesh` (Klasse und Id der Zeichnung, Farbe des Teils), Weltkoordinaten.
 pub fn imported_meshes(p: &Project) -> Vec<crate::model::ImportedMesh> {
+    imported_meshes_where(p, &|_| true)
+}
+
+/// [312] Personen: im Schnitt nur Silhouette (Umriss der Teile vereinigt), nie Netzkanten.
+pub fn is_person(lib_id: &str) -> bool {
+    matches!(lib_id, "lib:person-stehend" | "lib:person-gehend")
+}
+
+/// Wie [`imported_meshes`], nur für Instanzen mit `keep(lib_id)`.
+pub fn imported_meshes_where(p: &Project, keep: &dyn Fn(&str) -> bool) -> Vec<crate::model::ImportedMesh> {
     let hex = |c: [f64; 3]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8);
     let mut out = Vec::new();
     for (i, parts) in placed(p) {
         let d = &p.drawings2d[i];
+        if matches!(&d.geom, Drawing2DGeom::Libobj { lib_id, .. } if !keep(lib_id)) {
+            continue;
+        }
         for m in parts {
             out.push(crate::model::ImportedMesh {
                 id: d.id.clone(),

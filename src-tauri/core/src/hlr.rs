@@ -82,11 +82,13 @@ pub struct Face {
     pub no_edge: Vec<bool>,
     /// Körper (vom Aufrufer vergeben, 0 = keiner): Flächen verschiedener Körper liefern Durchdringungslinien.
     pub solid: u32,
+    /// Knickwinkel (Grad) innerhalb der Glättungsgruppe, wenn grösser als der von `Opts` ([312]: grobe Netze der Entourage).
+    pub crease_deg: Option<f64>,
 }
 
 impl Face {
     pub fn new(pts: Vec<V3>, normal: V3, owner: u32) -> Face {
-        Face { pts, normal, smooth: 0, owner, edges: true, occludes: true, two_sided: false, no_edge: Vec::new(), solid: 0 }
+        Face { pts, normal, smooth: 0, owner, edges: true, occludes: true, two_sided: false, no_edge: Vec::new(), solid: 0, crease_deg: None }
     }
 }
 
@@ -509,7 +511,8 @@ fn is_feature(faces: &[Face], prep: &[Option<Prep>], att: &[(u32, V3)], cos_crea
             }
             let c = dot(ni, n(att[j].0));
             let (si, sj) = (faces[fi as usize].smooth, faces[att[j].0 as usize].smooth);
-            c > 1.0 - 1e-6 || (si != 0 && si == sj && c > cos_crease)
+            let cc = faces[fi as usize].crease_deg.map_or(cos_crease, |d| cos_crease.min(d.to_radians().cos()));
+            c > 1.0 - 1e-6 || (si != 0 && si == sj && c > cc)
         });
         if !continued {
             return true;
@@ -1255,5 +1258,32 @@ mod tests {
         assert_eq!(p.len(), 4);
         assert_eq!(ne.iter().filter(|&&x| x).count(), 1);
         assert!(clip_front(&[[0.0, 0.0, -1.0], [1.0, 0.0, -1.0], [0.0, 1.0, -1.0]]).is_none());
+    }
+}
+
+#[cfg(test)]
+mod crease_tests {
+    use super::*;
+
+    /// Zwei Quadrate mit `deg` Grad Knick; gezählt werden die sichtbaren Kantenstücke auf der gemeinsamen Kante y = 1.
+    fn fold(deg: f64, crease: Option<f64>) -> usize {
+        let a = deg.to_radians();
+        let (s, c) = (a.sin(), a.cos());
+        let mut f1 = Face::new(vec![[0.0, 0.0, 1.0], [1.0, 0.0, 1.0], [1.0, 1.0, 1.0], [0.0, 1.0, 1.0]], [0.0, 0.0, -1.0], 0);
+        let mut f2 = Face::new(vec![[0.0, 1.0, 1.0], [1.0, 1.0, 1.0], [1.0, 1.0 + c, 1.0 - s], [0.0, 1.0 + c, 1.0 - s]], [0.0, -s, -c], 0);
+        for f in [&mut f1, &mut f2] {
+            f.smooth = 1;
+            f.crease_deg = crease;
+            f.two_sided = true;
+        }
+        let segs = hidden_lines(&[f1, f2], &Opts::default());
+        segs.iter().filter(|s| (s.a[1] - 1.0).abs() < 1e-6 && (s.b[1] - 1.0).abs() < 1e-6 && !s.hidden).count()
+    }
+
+    #[test]
+    fn grober_knickwinkel_je_flaeche() {
+        assert!(fold(28.0, None) >= 1, "28 Grad über dem Standard von 20");
+        assert_eq!(fold(28.0, Some(35.0)), 0);
+        assert!(fold(50.0, Some(35.0)) >= 1);
     }
 }

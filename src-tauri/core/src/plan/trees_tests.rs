@@ -187,7 +187,7 @@ fn entourage_im_schnitt() {
     p.drawings2d.push(person_at("vorn", 20.0, -5.0));
     let prims = section(&p);
     let frei = entourage_polys(&prims, "frei");
-    assert!(frei.len() >= 5 && frei.iter().all(|(f, _)| !*f), "{frei:?}");
+    assert!(!frei.is_empty() && frei.len() < 5 && frei.iter().all(|(f, _)| !*f), "[312] eine Silhouette statt Umriss je Teil: {frei:?}");
     assert!(entourage_polys(&prims, "vorn").is_empty(), "vor der Ebene fehlt sie");
     p.drawings2d.push(person_at("haus", 2.5, 3.0));
     assert!(!entourage_polys(&section(&p), "haus").is_empty(), "Pick-Fläche bleibt");
@@ -220,7 +220,7 @@ fn entourage_im_schnitt_ansichtskanten() {
         polys.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (_, q)| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])])
     };
     let prims = section_at(&p, 100.0);
-    assert!(entourage_polys(&prims, "stuhl").is_empty(), "keine Umriss-Polygone mehr");
+    assert!(!prims.iter().any(|q| matches!(q, Primitive::Polygon { drawing_id: Some(d), stroke, .. } if d == "stuhl" && stroke != "none")), "keine Umriss-Polygone mehr (nur Pick-Fläche)");
     let l = lines_in(&prims, hull);
     assert!(l.len() > 8, "Ansichtskanten des Stuhls: {}", l.len());
     // Mindestens ein Stück der Hülle ist leer (Sitzfläche/Lehne), die Kanten füllen die Hülle nicht nur am Rand.
@@ -250,6 +250,25 @@ fn entourage_geschnitten_nur_umriss() {
     let heavy = l.iter().filter(|&&(w, _)| w >= 0.25 - 1e-9).count();
     assert!(heavy >= 3, "Schnittumriss: {l:?}");
     assert!(l.len() > heavy, "dazu feine Ansichtskanten dahinter");
-    let inside = |q: &Primitive| matches!(q, Primitive::Polygon { pts, .. } if !pts.is_empty() && pts.iter().all(|p| p.x >= hull[0] - 1e-6 && p.x <= hull[2] + 1e-6 && p.y >= hull[1] - 1e-6 && p.y <= hull[3] + 1e-6));
+    let inside = |q: &Primitive| matches!(q, Primitive::Polygon { pts, stroke, .. } if stroke != "none" && !pts.is_empty() && pts.iter().all(|p| p.x >= hull[0] - 1e-6 && p.x <= hull[2] + 1e-6 && p.y >= hull[1] - 1e-6 && p.y <= hull[3] + 1e-6));
     assert!(!prims.iter().any(inside), "keine Fläche");
+}
+
+/// [312] Schnitt 1:100: Personen nur als Silhouette (Polygon-Umriss der vereinigten Teile, keine Netzkanten, weniger Umrisse
+/// als Teile), Möbel haben eine Pick-Fläche (unsichtbares Polygon mit der Id der Zeichnung) und Kanten aus dem Netz.
+#[test]
+fn entourage_schnitt_silhouette_und_pick() {
+    let mut p = sample();
+    p.drawings2d.push(person_at("frau", 20.0, 10.0));
+    p.drawings2d.push(chair_at("stuhl", 24.0, 10.0));
+    let prims = section_at(&p, 100.0);
+    let person = entourage_polys(&prims, "frau");
+    let at200 = entourage_polys(&section_at(&p, 200.0), "frau");
+    assert!(!person.is_empty() && person.len() < 5 && person.iter().all(|(f, _)| !*f), "Silhouette: {person:?}");
+    assert_eq!(person.len(), at200.len(), "1:100 wie 1:200");
+    let hull = person.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (_, q)| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])]);
+    assert!(lines_in(&prims, hull).is_empty(), "keine Netzkanten der Person");
+    let pick = prims.iter().filter(|q| matches!(q, Primitive::Polygon { drawing_id: Some(d), stroke, .. } if d == "stuhl" && stroke == "none")).count();
+    assert!(pick >= 1, "Pick-Fläche des Stuhls");
+    assert!(prims.iter().any(|q| matches!(q, Primitive::Line { .. })));
 }
