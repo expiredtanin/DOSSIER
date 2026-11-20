@@ -2228,7 +2228,13 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mu
     }
     if let Some(s) = &sit {
         if c.a.global {
-            super::situation::symbol_prims(c, s, &mut out.sections, bounds);
+            let mut o = obstacles_with(out, drawing_obstacles(c), true);
+            for q in &out.roofs {
+                if matches!(q, Primitive::Polygon { .. } | Primitive::Line { .. }) {
+                    o.add_prim(q);
+                }
+            }
+            super::situation::symbol_prims(c, s, &mut out.sections, bounds, &o);
         }
         return;
     }

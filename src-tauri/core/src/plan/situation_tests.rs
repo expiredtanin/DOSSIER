@@ -271,3 +271,31 @@ fn planzeichen_dicht_an_der_lage() {
     assert!(!ys.is_empty());
     assert!(ys.iter().all(|y| *y < -8.0 && *y > -20.0), "unter der Parzelle, über dem fernen Kataster-Haus: {ys:?}");
 }
+
+/// [321] Rampe (Decke mit Gefälle als Rampe) zählt nicht zum Gebäude der Situation.
+#[test]
+fn rampe_ist_kein_gebaeude() {
+    let p = project();
+    let mut v = serde_json::to_value(&p).unwrap();
+    v["ceilings"] = json!([{"id": "c-rampe", "type": "ceiling", "floorId": "eg", "categoryCode": "30", "outline": [{"x": 30, "y": 2}, {"x": 36, "y": 2}, {"x": 36, "y": 5}, {"x": 30, "y": 5}],
+        "wallTypeId": "", "ceilingTypeId": "", "top": {"mode": "floor", "floorId": "eg", "offset": 0}, "slope": {"from": {"x": 30, "y": 3.5}, "to": {"x": 36, "y": 3.5}, "rise": -0.36, "ramp": true}}]);
+    let p: Project = serde_json::from_value(v).unwrap();
+    assert!(!own_polygons(&p).iter().flatten().flatten().any(|q| q[0] > 29.0), "Rampe nicht gefüllt");
+    // Ohne Rampen-Kennzeichen wäre sie Gebäude.
+    let mut v = serde_json::to_value(&p).unwrap();
+    v["ceilings"][0]["slope"]["ramp"] = json!(false);
+    let p2: Project = serde_json::from_value(v).unwrap();
+    assert!(own_polygons(&p2).iter().flatten().flatten().any(|q| q[0] > 29.0));
+}
+
+/// [321] Planzeichen stehen nicht auf Linien der Lage: eine senkrechte Linie durch den Balken verschiebt sie.
+#[test]
+fn planzeichen_weichen_linien_aus() {
+    let mut o = crate::plan::stamp_place::Obstacles::default();
+    let free = placed_symbols(500.0, 40.0, -10.0, &o);
+    let b0 = symbols_box(&free);
+    let x = (b0[0] + b0[2]) / 2.0;
+    o.seg([x, -200.0], [x, 200.0]);
+    let moved = symbols_box(&placed_symbols(500.0, 40.0, -10.0, &o));
+    assert!(moved[2] < x || moved[0] > x, "Zeichen links oder rechts der Linie: {moved:?} x={x}");
+}

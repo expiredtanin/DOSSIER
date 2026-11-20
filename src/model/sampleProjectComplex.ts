@@ -357,7 +357,7 @@ win("eg-f8", "eg-aw-o2", "mk-fe-fest", 1.2, 0.9, 0.9, 1.2, { shape: "rund" });
 win("eg-f9", "eg-anbau-o", "mk-fe-dk", 2.0, 1.0, 1.4, 0.9);
 door("eg-t-haus", "eg-anbau-n", "mk-tu-haus", 1.2, 1.1, 2.5, { isExternal: true, uValue: 1.2, burglaryClass: "RC2", hinge: "end" });
 door("eg-t-anbau", "eg-iw-anbau", "mk-tu-umfassung", 2.85, 1.0, 2.1, { fireRating: "EI30", swing: "right" });
-door("eg-t-wohnung", "eg-iw-kern-s", "mk-tu-umfassung", 0.4, 0.9, 2.1, { fireRating: "EI30", soundClass: "Rw 37 dB" });
+door("eg-t-wohnung", "eg-iw-kern-s", "mk-tu-umfassung", 1.1, 0.9, 2.1, { fireRating: "EI30", soundClass: "Rw 37 dB" });
 door("eg-t-zi1", "eg-iw-x6", "mk-tu-futter", 3.4, 0.85, 2.0, { hinge: "end" });
 door("eg-t-atelier", "eg-iw-x6", "mk-tu-futter", 5.3, 0.85, 2.0);
 door("eg-t-bad", "eg-iw-y75", "mk-tu-schiebe", 0.4, 0.9, 2.1);

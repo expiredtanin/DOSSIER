@@ -72,13 +72,16 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
   // [137] Übersprungen werden Flächen ohne Bauteil: Darstellung ohne Id (Schlagschatten der Ansicht,
   // Baurechts-Verstösse, Muster) und unsichtbare Pick-Bänder (Gelände-Rahmen, Baugrube, Schatten, Schnittlinie)
   // — sie lagen sonst über Wänden und Decken und machten diese unwählbar. Eine sichtbare Kontext-Fläche
-  // (Gelände in der Ansicht) verdeckt dagegen wie bisher.
+  // (Gelände in der Ansicht) zählt erst nach den Bauteilen ([321]).
   const hitTest = (clientX: number, clientY: number): number | null => {
     const v = clientToView(clientX, clientY, view);
     // Unter einem Gelände-/Baugruben-Band zählt die leere Innenfläche einer 2D-Kontur (z. B. Parzelle) nicht:
     // dort meint der Klick das Gelände (die Kontur bleibt über ihre Linie wählbar) — wie vor [137].
     const pick = getPick();
     let underBand = false;
+    // [321] Sichtbare Kontext-Fläche (Gelände der Ansicht) kommt nach den Bauteilen: sie verdeckt Wände, Decken
+    // usw. darunter nicht für den Klick, wird aber gewählt, wenn sonst nichts getroffen wird (Cmd+Klick zykelt weiter).
+    let contextHit: number | null = null;
     for (const i of pick.polygonsAt(viewToModel(v.x, v.y))) {
       const p = pick.prim(i);
       if (p?.kind !== "polygon") continue;
@@ -88,10 +91,10 @@ export function usePlanPicking(inp: UsePlanPickingArgs) {
       }
       // Lage-Darstellung (`@…`: Schlagschatten der Ansicht, Schatten, Baurecht) verdeckt nie — sie liegt auf den
       // Bauteilen und wird erst nach ihnen gewählt (bzw. per erneutem Klick, [137] Klick-Zyklus).
-      if (((p.contextObjectId && !p.contextObjectId.startsWith("@")) || p.sectionLineId) && p.fill !== "none") return i;
+      if (((p.contextObjectId && !p.contextObjectId.startsWith("@")) || p.sectionLineId) && p.fill !== "none") { if (p.sectionLineId) return i; contextHit ??= i; continue; }
       if (p.contextObjectId && !p.contextObjectId.startsWith("@")) underBand = true;
     }
-    return null;
+    return contextHit;
   };
 
   // Irgendein Element (Wand/Decke/Raum/Treppe/Stütze/Dach/2D) unter dem

@@ -135,7 +135,8 @@ pub fn own_polygons(p: &Project) -> Vec<Polygon> {
             parts.push(vec![f]);
         }
     }
-    for c in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|c| above(&c.floor_id)) {
+    for c in p.ceilings.as_deref().unwrap_or(&[]).iter().filter(|c| above(&c.floor_id) && !c.slope.as_ref().is_some_and(|s| s.ramp == Some(true))) {
+        // [321] Rampen sind kein Gebäude (Aufsicht bliebe sonst schwarz gefüllt).
         let r = c.ring_xy();
         if r.len() >= 3 && r.iter().all(ok) {
             parts.push(vec![r]);
@@ -368,7 +369,9 @@ pub fn context_mesh(c: &Ctx, s: &Opts, m: &ImportedMesh, out: &mut Vec<Primitive
 
 /// Nordpfeil und Massstabsbalken unter der Lage (Klasse „84"), rechtsbündig zum Ausmass von Gebäude, Parzelle
 /// und Kontext. Ohne Gebäude kein Anhaltspunkt ⇒ keine Zeichen.
-pub fn symbol_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>, bounds: &mut Bounds) {
+/// [321] `obst` = übrige Linien/Flächen der Lage: die Zeichen weichen ihnen aus (erst nach unten, dann nach links),
+/// damit z. B. „20 m“ nicht auf einer Parzellengrenze steht.
+pub fn symbol_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>, bounds: &mut Bounds, obst: &super::stamp_place::Obstacles) {
     if !s.symbols || !c.derived_shown(SYMBOL_CATEGORY) {
         return;
     }
@@ -390,7 +393,14 @@ pub fn symbol_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>, bounds: &mut Bo
         }
     }
     let Some([_, min_y, max_x, _]) = bb.get() else { return };
-    out.extend(symbols(c.a.scale, max_x, min_y));
+    let mut o = obst.clone();
+    if let Some(r) = c.p.site_rules.as_ref().map(|r| &r.parcel) {
+        for i in 0..r.len() {
+            let (a, b) = (&r[i], &r[(i + 1) % r.len()]);
+            o.seg([a.x, a.y], [b.x, b.y]);
+        }
+    }
+    out.extend(placed_symbols(c.a.scale, max_x, min_y, &o));
     for q in out.iter() {
         match q {
             Primitive::Polygon { pts, .. } => pts.iter().for_each(|p| bounds.acc(p.x, p.y)),
@@ -402,6 +412,49 @@ pub fn symbol_prims(c: &Ctx, s: &Opts, out: &mut Vec<Primitive>, bounds: &mut Bo
             _ => {}
         }
     }
+}
+
+/// Umriss der Zeichen `[minX, minY, maxX, maxY]`.
+fn symbols_box(ps: &[Primitive]) -> [f64; 4] {
+    let mut b = Bounds::new();
+    for q in ps {
+        match q {
+            Primitive::Polygon { pts, .. } => pts.iter().for_each(|p| b.acc(p.x, p.y)),
+            Primitive::Line { a, b: e, .. } => {
+                b.acc(a.x, a.y);
+                b.acc(e.x, e.y);
+            }
+            Primitive::DrawingText { at, text, height_m, .. } => {
+                b.acc(at.x, at.y);
+                b.acc(at.x + crate::text_layout::text_width_em(text, false) * height_m, at.y + height_m);
+            }
+            _ => {}
+        }
+    }
+    b.get().unwrap_or([0.0; 4])
+}
+
+/// [321] Zeichen an der ersten Lage ohne Überdeckung mit `obst`: Abstand unter der Lage 0 … 18 mm zusätzlich, je
+/// Stufe 0 … 80 mm nach links (Papier). Ist keine frei, gilt die mit der geringsten Überdeckung (bei Gleichstand die nächste).
+fn placed_symbols(scale: f64, right: f64, below: f64, obst: &super::stamp_place::Obstacles) -> Vec<Primitive> {
+    let mm = |v: f64| mm_to_model(v, scale);
+    let mut best: Option<(f64, Vec<Primitive>)> = None;
+    for dy in 0..=6 {
+        for dx in 0..=20 {
+            let ps = symbols(scale, right - mm(4.0 * dx as f64), below - mm(3.0 * dy as f64));
+            let b = symbols_box(&ps);
+            let pad = mm(0.5);
+            let (hw, hh) = ((b[2] - b[0]) / 2.0 + pad, (b[3] - b[1]) / 2.0 + pad);
+            let ov = obst.overlap(Vec2 { x: (b[0] + b[2]) / 2.0, y: (b[1] + b[3]) / 2.0 }, hw, hh);
+            if ov == 0.0 {
+                return ps;
+            }
+            if best.as_ref().is_none_or(|(o, _)| ov < *o) {
+                best = Some((ov, ps));
+            }
+        }
+    }
+    best.map(|b| b.1).unwrap_or_default()
 }
 
 /// Länge des Massstabsbalkens (m): die grösste runde Länge, die auf dem Papier höchstens 50 mm misst.

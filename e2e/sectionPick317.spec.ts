@@ -92,6 +92,17 @@ test("Schnitt und Ansicht: jedes Bauteil ist per Klick anwählbar, Pick-Ids geh�
   expect(r.failed, "nach Zoom").toEqual([]);
 });
 
+// [321] Ansicht Ost: UG-Wände, Baugrube und Bodenplatte liegen unter der sichtbaren Geländefläche — der Klick wählt
+// das Bauteil, das Gelände kommt nur, wenn sonst nichts getroffen wird.
+test("Ansicht Ost: Bauteile unter der Geländefläche sind per Klick anwählbar", async ({ page }) => {
+  test.setTimeout(300_000);
+  await open(page, /Musterhaus \(komplex\)/, "Musterhaus komplex");
+  await showSnapshot(page, "Ansicht Ost");
+  const r = await clickAll(page, (k) => k === "wallId" || k === "ceilingId");
+  expect(r.checked).toBeGreaterThan(3);
+  expect(r.failed).toEqual([]);
+});
+
 test("Wettbewerb: Schnitt A-A — Treppe, Decke, Wand, Dach, Zeichnung (Entourage) anwählbar", async ({ page }) => {
   test.setTimeout(300_000);
   await open(page, /^Neu aus Vorlage: Wettbewerb$/, "Wettbewerb");
