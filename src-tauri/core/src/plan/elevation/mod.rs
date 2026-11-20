@@ -711,6 +711,8 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
     // Sonnenstand der Schattenstudie.
     let light = sun::light_dir(p, &frame, mvo.elevation.sun_light);
     if shadows {
+        #[cfg(test)]
+        let _t = sun::PhaseTimer::new(&sun::SHADOW_NS);
         // Öffnungen (sichtbar): eigene Empfänger in ihrer Ebene (die Wand hat dort ein Loch), Schatten darüber
         // durchscheinend (Glas, Rahmen und Teilungen bleiben lesbar).
         let ops: Vec<(crate::flat::Polygon, f64)> = openings

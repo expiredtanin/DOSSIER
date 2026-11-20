@@ -104,6 +104,8 @@ fn area(r: &Ring) -> f64 {
 /// in Lichtrichtung `l` projizierten Werfer-Teile davor, geschnitten mit dem sichtbaren Teil. Werfer: ebene
 /// Polygone in Ansichtskoordinaten (u, v, Tiefe).
 pub(super) fn cast(receivers: &[Receiver], casters: &[Vec<[f64; 3]>], l: [f64; 3]) -> Vec<Vec<Polygon>> {
+    #[cfg(test)]
+    let _t = PhaseTimer::new(&CAST_NS);
     if !l.iter().all(|x| x.is_finite()) {
         return vec![Vec::new(); receivers.len()];
     }
@@ -115,61 +117,157 @@ pub(super) fn cast(receivers: &[Receiver], casters: &[Vec<[f64; 3]>], l: [f64; 3
     receivers
         .iter()
         .map(|r| {
-            let [a, b, c] = r.plane;
-            if r.region.is_empty() || ![a, b, c].iter().all(|x| x.is_finite()) {
-                return Vec::new();
+            let out = shade(r, casters, &boxes, l, true);
+            #[cfg(test)]
+            if COMPARE.load(std::sync::atomic::Ordering::Relaxed) {
+                compare_reference(&out, &shade(r, casters, &boxes, l, false));
             }
-            // Vorderseite (dem Betrachter zu) mit Normale (b, c, −1): besonnt, wenn das Licht gegen sie läuft.
-            let den = l[2] - b * l[0] - c * l[1];
-            if den <= LIT_MIN * (1.0 + b * b + c * c).sqrt() {
-                return r.region.clone();
-            }
-            let rb = bbox_of(&r.region);
-            let mut pieces: Vec<Polygon> = Vec::new();
-            for (k, poly) in casters.iter().enumerate() {
-                let bx = boxes[k];
-                if poly.len() < 3 || !bx.iter().all(|x| x.is_finite()) {
-                    continue;
-                }
-                // Grobprüfung: Lichtweg t der Ecken bis zur Ebene, Schattenbox gegen die Fläche.
-                let corners = [(bx[0], bx[2]), (bx[1], bx[2]), (bx[0], bx[3]), (bx[1], bx[3])];
-                let (pmin, pmax) = corners.iter().map(|&(u, v)| a + b * u + c * v).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
-                let tmax = (pmax - bx[4]) / den;
-                if !(tmax > T_MIN) {
-                    continue;
-                }
-                let tmin = ((pmin - bx[5]) / den).max(T_MIN);
-                let (du0, du1) = (tmin * l[0], tmax * l[0]);
-                let (dv0, dv1) = (tmin * l[1], tmax * l[1]);
-                if bx[0] + du0.min(du1) > rb[1] || bx[1] + du0.max(du1) < rb[0] || bx[2] + dv0.min(dv1) > rb[3] || bx[3] + dv0.max(dv1) < rb[2] {
-                    continue;
-                }
-                // Werfer auf t ≥ T_MIN beschneiden (t affin in u, v, Tiefe) und in Lichtrichtung auf die Ebene legen.
-                let t: Vec<f64> = poly.iter().map(|q| (a + b * q[0] + c * q[1] - q[2]) / den).collect();
-                let proj = |q: [f64; 3], t: f64| [q[0] + t * l[0], q[1] + t * l[1]];
-                let mut ring: Ring = Vec::with_capacity(poly.len() + 2);
-                for i in 0..poly.len() {
-                    let j = (i + 1) % poly.len();
-                    let (ti, tj) = (t[i], t[j]);
-                    if ti >= T_MIN {
-                        ring.push(proj(poly[i], ti));
-                    }
-                    if (ti >= T_MIN) != (tj >= T_MIN) {
-                        let s = (T_MIN - ti) / (tj - ti);
-                        let (qi, qj) = (poly[i], poly[j]);
-                        ring.push(proj([qi[0] + (qj[0] - qi[0]) * s, qi[1] + (qj[1] - qi[1]) * s, qi[2] + (qj[2] - qi[2]) * s], T_MIN));
-                    }
-                }
-                if ring.len() >= 3 && area(&ring).abs() > 1e-8 {
-                    pieces.push(vec![ring]);
-                }
-            }
-            if pieces.is_empty() {
-                return Vec::new();
-            }
-            crate::polygon_bool::intersection(&crate::polygon_bool::union(&pieces), &r.region)
+            out
         })
         .collect()
+}
+
+/// Schatten eines Empfängers. `prefilter` = [319] Werfer-Stücke vorab aufs Hüllrechteck beschnitten und EIN Boolean;
+/// ohne (nur als Vergleich in Tests) wie in [316]: alle Stücke vereinigt, dann geschnitten.
+fn shade(r: &Receiver, casters: &[Vec<[f64; 3]>], boxes: &[[f64; 6]], l: [f64; 3], prefilter: bool) -> Vec<Polygon> {
+    let [a, b, c] = r.plane;
+    if r.region.is_empty() || ![a, b, c].iter().all(|x| x.is_finite()) {
+        return Vec::new();
+    }
+    // Vorderseite (dem Betrachter zu) mit Normale (b, c, −1): besonnt, wenn das Licht gegen sie läuft.
+    let den = l[2] - b * l[0] - c * l[1];
+    if den <= LIT_MIN * (1.0 + b * b + c * c).sqrt() {
+        return r.region.clone();
+    }
+    let rb = bbox_of(&r.region);
+    let rect: Ring = vec![[rb[0], rb[2]], [rb[1], rb[2]], [rb[1], rb[3]], [rb[0], rb[3]]];
+    let hull = convex_hull_of(&r.region, rb);
+    let hull_area = hull.as_ref().map_or(0.0, |h| area(h).abs());
+    let mut pieces: Vec<Polygon> = Vec::new();
+    for (k, poly) in casters.iter().enumerate() {
+        let bx = boxes[k];
+        if poly.len() < 3 || !bx.iter().all(|x| x.is_finite()) {
+            continue;
+        }
+        // Grobprüfung: Lichtweg t der Ecken bis zur Ebene, Schattenbox gegen die Fläche.
+        let corners = [(bx[0], bx[2]), (bx[1], bx[2]), (bx[0], bx[3]), (bx[1], bx[3])];
+        let (pmin, pmax) = corners.iter().map(|&(u, v)| a + b * u + c * v).fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), x| (lo.min(x), hi.max(x)));
+        let tmax = (pmax - bx[4]) / den;
+        if !(tmax > T_MIN) {
+            continue;
+        }
+        let tmin = ((pmin - bx[5]) / den).max(T_MIN);
+        let (du0, du1) = (tmin * l[0], tmax * l[0]);
+        let (dv0, dv1) = (tmin * l[1], tmax * l[1]);
+        if bx[0] + du0.min(du1) > rb[1] || bx[1] + du0.max(du1) < rb[0] || bx[2] + dv0.min(dv1) > rb[3] || bx[3] + dv0.max(dv1) < rb[2] {
+            continue;
+        }
+        // Werfer auf t ≥ T_MIN beschneiden (t affin in u, v, Tiefe) und in Lichtrichtung auf die Ebene legen.
+        let t: Vec<f64> = poly.iter().map(|q| (a + b * q[0] + c * q[1] - q[2]) / den).collect();
+        let proj = |q: [f64; 3], t: f64| [q[0] + t * l[0], q[1] + t * l[1]];
+        let mut ring: Ring = Vec::with_capacity(poly.len() + 2);
+        for i in 0..poly.len() {
+            let j = (i + 1) % poly.len();
+            let (ti, tj) = (t[i], t[j]);
+            if ti >= T_MIN {
+                ring.push(proj(poly[i], ti));
+            }
+            if (ti >= T_MIN) != (tj >= T_MIN) {
+                let s = (T_MIN - ti) / (tj - ti);
+                let (qi, qj) = (poly[i], poly[j]);
+                ring.push(proj([qi[0] + (qj[0] - qi[0]) * s, qi[1] + (qj[1] - qi[1]) * s, qi[2] + (qj[2] - qi[2]) * s], T_MIN));
+            }
+        }
+        if ring.len() < 3 || area(&ring).abs() <= 1e-8 {
+            continue;
+        }
+        if !prefilter {
+            pieces.push(vec![ring]);
+            continue;
+        }
+        // [319] Vorab aufs Hüllrechteck des Empfängers beschneiden; Stücke neben seinem konvexen Umriss
+        // entfallen, die übrigen gehen klein in den EINEN Boolean unten. Deckt eines die konvexe Fläche
+        // ganz, genügt es allein.
+        let ring = clip_convex(&ring, &rect);
+        if ring.len() < 3 || area(&ring).abs() <= CLIP_AREA_MIN {
+            continue;
+        }
+        if let Some(h) = &hull {
+            let a = area(&clip_convex(&ring, h)).abs();
+            if a <= CLIP_AREA_MIN {
+                continue;
+            }
+            if a >= hull_area * (1.0 - 1e-9) {
+                pieces = vec![vec![ring]];
+                break;
+            }
+        }
+        pieces.push(vec![ring]);
+    }
+    if pieces.is_empty() {
+        return Vec::new();
+    }
+    if !prefilter {
+        return crate::polygon_bool::intersection(&crate::polygon_bool::union(&pieces), &r.region);
+    }
+    // Ein Boolean je Empfänger: die Werfer-Stücke vereinigt (Non-Zero) und mit dem sichtbaren Teil geschnitten.
+    crate::polygon_bool::intersection(&r.region, &pieces)
+}
+
+/// [319] Beschnittene Stücke unter so viel Fläche (m²) entfallen (Rundungssplitter an der Hülle).
+const CLIP_AREA_MIN: f64 = 1e-10;
+
+/// [319] Konvexer Umriss eines Empfängers (ein Ring ohne Loch), gegen den Uhrzeigersinn; sonst `None`. Dient nur der
+/// Prüfung, ob ein Werfer-Stück die Fläche trifft bzw. ganz deckt — beschnitten wird am Hüllrechteck (achsparallel,
+/// exakte Kanten: an schrägen Kanten beschnittene Stücke teilen fast, aber nicht genau gleiche Kanten, daran
+/// verrechnet sich i_overlay um Sekunden).
+fn convex_hull_of(region: &[Polygon], rb: [f64; 4]) -> Option<Ring> {
+    let [poly] = region else { return None };
+    let [ring] = poly.as_slice() else { return None };
+    let n = ring.len();
+    let s = area(ring).signum();
+    let tol = 1e-12 * (1.0 + (rb[1] - rb[0]).abs() + (rb[3] - rb[2]).abs()).powi(2);
+    let convex = n >= 3
+        && s != 0.0
+        && (0..n).all(|i| {
+            let (p, q, w) = (ring[i], ring[(i + 1) % n], ring[(i + 2) % n]);
+            s * ((q[0] - p[0]) * (w[1] - q[1]) - (q[1] - p[1]) * (w[0] - q[0])) >= -tol
+        });
+    if !convex {
+        return None;
+    }
+    let mut h = ring.clone();
+    if s < 0.0 {
+        h.reverse();
+    }
+    Some(h)
+}
+
+/// [319] Sutherland-Hodgman: `subject` auf den konvexen Ring `hull` (gegen den Uhrzeigersinn) beschnitten.
+fn clip_convex(subject: &Ring, hull: &Ring) -> Ring {
+    let mut out = subject.clone();
+    let n = hull.len();
+    for i in 0..n {
+        if out.len() < 3 {
+            return Vec::new();
+        }
+        let (a, b) = (hull[i], hull[(i + 1) % n]);
+        let side = |q: [f64; 2]| (b[0] - a[0]) * (q[1] - a[1]) - (b[1] - a[1]) * (q[0] - a[0]);
+        let input = std::mem::take(&mut out);
+        let m = input.len();
+        for k in 0..m {
+            let (p, q) = (input[k], input[(k + 1) % m]);
+            let (sp, sq) = (side(p), side(q));
+            if sp >= 0.0 {
+                out.push(p);
+            }
+            if (sp >= 0.0) != (sq >= 0.0) {
+                let t = sp / (sp - sq);
+                out.push([p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]);
+            }
+        }
+    }
+    out
 }
 
 /// Leibungsschatten einer Öffnung (Anteile der Breite bzw. Höhe, 0 = keiner): oben und auf der Seite, von der das
@@ -181,6 +279,39 @@ pub(super) fn reveal_fractions(l: [f64; 3], reveal: f64, width: f64, height: f64
     let top = (reveal * -l[1] / l[2]).max(0.0);
     let side = reveal * l[0].abs() / l[2];
     Some(((side / width.max(1e-6)).min(0.3), (top / height.max(1e-6)).min(0.3), l[0] > 0.0))
+}
+
+/// Zeitmessung je Phase (nur Tests, [319] `bench319`).
+#[cfg(test)]
+pub(super) static CAST_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// [319] Vergleich mit der Rechnung aus [316] (nur Tests): Anzahl Empfänger, grösste Fläche der symmetrischen Differenz (m²).
+#[cfg(test)]
+pub(super) static COMPARE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+#[cfg(test)]
+pub(super) static COMPARE_STATS: std::sync::Mutex<(usize, f64)> = std::sync::Mutex::new((0, 0.0));
+#[cfg(test)]
+fn compare_reference(new: &[Polygon], reference: &[Polygon]) {
+    let sym = |a: &[Polygon], b: &[Polygon]| crate::polygon_bool::difference(a, b).iter().map(|p| p.iter().map(|r| area(r)).sum::<f64>().abs()).sum::<f64>();
+    let d = sym(new, reference) + sym(reference, new);
+    let mut st = COMPARE_STATS.lock().unwrap();
+    st.0 += 1;
+    st.1 = st.1.max(d);
+}
+#[cfg(test)]
+pub(super) static SHADOW_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+#[cfg(test)]
+pub(super) struct PhaseTimer(&'static std::sync::atomic::AtomicU64, std::time::Instant);
+#[cfg(test)]
+impl PhaseTimer {
+    pub(super) fn new(c: &'static std::sync::atomic::AtomicU64) -> Self {
+        PhaseTimer(c, std::time::Instant::now())
+    }
+}
+#[cfg(test)]
+impl Drop for PhaseTimer {
+    fn drop(&mut self) {
+        self.0.fetch_add(self.1.elapsed().as_nanos() as u64, std::sync::atomic::Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
@@ -292,4 +423,77 @@ mod tests {
         let (fs, _, left) = reveal_fractions([-0.5, -0.5, 0.7], 0.08, 1.0, 1.0).unwrap();
         assert!(fs > 0.0 && !left);
     }
+
+    #[test]
+    fn vorab_beschnitt_dreieck_und_volle_deckung() {
+        // Dreieckiger Empfänger (Dachfacette), Licht genau von vorn (Schatten = Werfer verschoben um 0): ein Werfer im
+        // Hüllrechteck, aber neben dem Dreieck wirft nichts; einer, der es ganz deckt, gibt genau das Dreieck.
+        let tri = Receiver { plane: [2.0, 0.0, 0.0], region: vec![vec![vec![[0.0, 0.0], [4.0, 0.0], [0.0, 4.0]]]] };
+        let quad = |u0: f64, u1: f64, v0: f64, v1: f64| vec![[u0, v0, 1.0], [u1, v0, 1.0], [u1, v1, 1.0], [u0, v1, 1.0]];
+        let l = [0.0, 0.0, 1.0];
+        assert!(cast(&[tri], &[quad(3.0, 4.0, 3.0, 4.0)], l)[0].is_empty());
+        let tri = Receiver { plane: [2.0, 0.0, 0.0], region: vec![vec![vec![[0.0, 0.0], [4.0, 0.0], [0.0, 4.0]]]] };
+        let s = cast(&[tri], &[quad(3.0, 4.0, 3.0, 4.0), quad(-1.0, 5.0, -1.0, 5.0), quad(0.5, 1.0, 0.5, 1.0)], l);
+        assert!((total_area(&s[0]) - 8.0).abs() < 1e-6, "{}", total_area(&s[0]));
+        // Teildeckung über einer Wand mit Loch (nicht konvex): Schnitt wie vorher.
+        let holed = Receiver { plane: [2.0, 0.0, 0.0], region: vec![vec![vec![[0.0, 0.0], [6.0, 0.0], [6.0, 3.0], [0.0, 3.0]], vec![[2.0, 1.0], [2.0, 2.0], [3.0, 2.0], [3.0, 1.0]]]] };
+        let s = cast(&[holed], &[quad(1.0, 4.0, 0.5, 2.5), quad(-2.0, 1.5, -1.0, 1.0)], l);
+        // 3 × 2 − Loch 1 = 5, dazu (0 … 1.5) × (0 … 1) ohne Überlappung mit dem ersten (u 1 … 1.5, v 0.5 … 1): 1.5 − 0.25.
+        assert!((total_area(&s[0]) - 6.25).abs() < 1e-6, "{}", total_area(&s[0]));
+    }
+
+    #[test]
+    fn viele_werfer_auf_schmaler_schraeger_flaeche_schnell() {
+        // [319] Schmale, leicht schräge Fläche (Sockelband) unter vielen gestaffelten Werfern, die einander fast
+        // deckungsgleich überlappen: vorher (an der schrägen Kante beschnittene Stücke) Sekunden in i_overlay.
+        let band = Receiver { plane: [2.0, 0.0, 0.0], region: vec![vec![vec![[17.0, 0.0], [17.0, -0.7277], [20.195, -0.7123], [20.195, 0.0]]]] };
+        let casters: Vec<Vec<[f64; 3]>> = (0..400)
+            .map(|i| {
+                let u = 17.0 + 0.0077 * i as f64;
+                vec![[u, 0.5, 1.0], [u + 0.9, 0.5, 1.0], [u + 0.9, 1.2, 1.0], [u, 1.2, 1.0]]
+            })
+            .collect();
+        let t = std::time::Instant::now();
+        let s = cast(&[band], &casters, conventional());
+        assert!(t.elapsed().as_secs_f64() < 5.0, "{:?}", t.elapsed());
+        assert!(total_area(&s[0]) > 1.0);
+    }
+
+    /// [319] Zeit der Ansichten samt Schattenanteil (nativ, von Hand; Mittel über `BENCH_RUNS` nach einem Aufwärm-Lauf):
+    /// `BENCH_FILE=mk.obp cargo test --release --lib bench319 -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench319() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let Ok(path) = std::env::var("BENCH_FILE") else { return };
+        let runs: usize = std::env::var("BENCH_RUNS").ok().and_then(|s| s.parse().ok()).unwrap_or(3);
+        let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+        let time = |text: &str, sh: f64| {
+            super::elevation_plan_buf(&p, &[0.0, sh], text).unwrap();
+            SHADOW_NS.store(0, Relaxed);
+            CAST_NS.store(0, Relaxed);
+            let t = std::time::Instant::now();
+            for _ in 0..runs {
+                super::elevation_plan_buf(&p, &[0.0, sh], text).unwrap();
+            }
+            let n = runs as f64;
+            (t.elapsed().as_secs_f64() * 1e3 / n, SHADOW_NS.load(Relaxed) as f64 / 1e6 / n, CAST_NS.load(Relaxed) as f64 / 1e6 / n)
+        };
+        let mut sum = [0.0; 3];
+        for l in p.drawing_levels.iter().filter(|l| l.kind == crate::model::DrawingLevelKind::Elevation && l.line_points.is_some() && l.layout_id.is_none()) {
+            let text = serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string();
+            let (t0, _, _) = time(&text, 0.0);
+            let (t1, ts, tc) = time(&text, 1.0);
+            // Gleiches Ergebnis wie die Rechnung aus [316]?
+            *COMPARE_STATS.lock().unwrap() = (0, 0.0);
+            COMPARE.store(true, Relaxed);
+            super::elevation_plan_buf(&p, &[0.0, 1.0], &text).unwrap();
+            COMPARE.store(false, Relaxed);
+            let (n, d) = *COMPARE_STATS.lock().unwrap();
+            println!("{}: ohne Schatten {t0:.1} ms, mit {t1:.1} ms, Schatten {ts:.1} ms (davon cast {tc:.1} ms); {n} Empfänger, Abweichung zu [316] höchstens {d:.2e} m²", l.id);
+            sum = [sum[0] + t1, sum[1] + ts, sum[2] + tc];
+        }
+        println!("Summe mit Schatten {:.1} ms, Schatten {:.1} ms (davon cast {:.1} ms)", sum[0], sum[1], sum[2]);
+    }
 }
+
