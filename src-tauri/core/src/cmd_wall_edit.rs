@@ -1027,15 +1027,16 @@ enum Spot {
     Inner,
 }
 
+/// [315] Ausserhalb der Wand gilt jeder Abstand als Ende (Verbinden wirkt immer, wie in Vectorworks/Archicad; vorher
+/// nur bis `tol`). `tol` trennt nur noch im Innern: näher als `tol` an einem Ende = Ende (wird gekürzt), sonst
+/// Innen (T-Stoss).
 fn spot(ax: &Axis, x: P, tol: f64) -> Option<Spot> {
     let s = ax.local(x).0;
     let (d0, d1) = (s.abs(), (s - ax.len).abs());
-    if d0.min(d1) <= tol {
+    if d0.min(d1) <= tol || !(s > 0.0 && s < ax.len) {
         Some(Spot::End(d0.min(d1), d1 < d0))
-    } else if s > 0.0 && s < ax.len {
-        Some(Spot::Inner)
     } else {
-        None
+        Some(Spot::Inner)
     }
 }
 
@@ -1106,7 +1107,13 @@ fn connect_pair(pr: &Project, sel: &[(&Wall, Axis)], i: usize, j: usize) -> Opti
     };
     let tol = 0.5_f64.max(2.0 * thick(wi).max(thick(wj)));
     let mut best: Option<(f64, Vec<Move>)> = None;
-    for x in connect_hits(ai, aj) {
+    let hits = connect_hits(ai, aj);
+    // [315] Kreuzen sich die Wände schon (ein Schnittpunkt im Innern beider), bleibt das Paar unberührt — ohne
+    // Abstandslimit würde sonst ein zweiter, ferner Schnittpunkt (Bogen × Gerade) gesucht.
+    if hits.iter().any(|x| matches!((spot(ai, *x, tol), spot(aj, *x, tol)), (Some(Spot::Inner), Some(Spot::Inner)))) {
+        return None;
+    }
+    for x in hits {
         let cand = match (spot(ai, x, tol), spot(aj, x, tol)) {
             (Some(Spot::End(da, ea)), Some(Spot::End(db, eb))) => (da + db, vec![Move { i, at_end: ea, x }, Move { i: j, at_end: eb, x }]),
             (Some(Spot::End(da, ea)), Some(Spot::Inner)) => (da, vec![Move { i, at_end: ea, x: tee_face_point(pr, ai, ea, wj, aj, x).unwrap_or(x) }]),
@@ -1184,7 +1191,7 @@ pub fn connect_ops(root: &Map<String, Value>, pr: &Project, ids_sel: &[String], 
 }
 
 /// Hinweis für die Hülle, wenn Verbinden ([190]) bei gewählten Wänden nichts bewirkt: i18n-Schlüssel, bei
-/// Zahlen mit `|`-getrennten Werten dahinter (`cmd.join.far|0.73|0.50` = Abstand, Toleranz in Metern).
+/// Zahlen mit `|`-getrennten Werten dahinter ([315]: der Abstands-Hinweis `cmd.join.far` entfällt, Verbinden wirkt immer).
 /// `None`, wenn kein Grund erkennbar ist (die Hülle zeigt dann den allgemeinen Hinweis).
 pub fn join_hint(pr: &Project, ids_sel: &[String]) -> Option<String> {
     let sel: Vec<&Wall> = walls(pr).iter().filter(|w| ids_sel.contains(&w.id)).collect();
@@ -1196,7 +1203,6 @@ pub fn join_hint(pr: &Project, ids_sel: &[String]) -> Option<String> {
         return Some("cmd.join.locked".into());
     }
     let (mut same_floor, mut parallel, mut met, mut crossing, mut arc_apart) = (false, false, false, false, false);
-    let mut far: Option<(f64, f64)> = None;
     for i in 0..free.len() {
         for j in i + 1..free.len() {
             let ((wi, ai), (wj, aj)) = (&free[i], &free[j]);
@@ -1222,11 +1228,6 @@ pub fn join_hint(pr: &Project, ids_sel: &[String]) -> Option<String> {
                     (s.abs().min((s - a.len).abs()), false)
                 }
             };
-            let thick = |w: &Wall| {
-                let (lo, hi) = faces(pr, w);
-                (hi - lo).abs()
-            };
-            let tol = 0.5_f64.max(2.0 * thick(wi).max(thick(wj)));
             // Der Schnittpunkt nächst an beiden Wänden zählt (Bögen: bis zu zwei Lösungen).
             let worst = |g: &((f64, bool), (f64, bool))| g.0 .0.max(g.1 .0);
             let Some(((gi, ini), (gj, inj))) = hits.iter().map(|x| (gap(ai, *x), gap(aj, *x))).min_by(|p, q| worst(p).total_cmp(&worst(q))) else { continue };
@@ -1234,19 +1235,12 @@ pub fn join_hint(pr: &Project, ids_sel: &[String]) -> Option<String> {
                 crossing = true;
             } else if gi.max(gj) < 1e-6 {
                 met = true;
-            } else if gi.max(gj) > tol {
-                let g = gi.max(gj);
-                if far.map_or(true, |f| g < f.0) {
-                    far = Some((g, tol));
-                }
             }
+            // [315] Kein Abstandslimit mehr (Verbinden wirkt immer): der Hinweis „zu weit“ entfällt.
         }
     }
     if !same_floor {
         return Some("cmd.join.floors".into());
-    }
-    if let Some((g, tol)) = far {
-        return Some(format!("cmd.join.far|{g:.2}|{tol:.2}"));
     }
     if met {
         return Some("cmd.join.met".into());
@@ -1669,11 +1663,12 @@ mod tests {
         let r = project(vec![wall("a", (0.0, 0.0), (6.4, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)], vec![], vec![]);
         let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
         assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
-        // Schon sauber oder zu weit weg: nichts.
+        // Schon sauber: nichts. [315] Weit weg (2 m Lücke): wird trotzdem verbunden (kein Abstandslimit mehr).
         let r = project(vec![wall("a", (0.0, 0.0), (6.0, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)], vec![], vec![]);
         assert!(connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]).is_empty());
         let r = project(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)], vec![], vec![]);
-        assert!(connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]).is_empty());
+        let n = apply(&r, connect_ops(&r, &typed(&r), &["a".into(), "b".into()], &[]));
+        assert!(close(xy_of(&w_of(&n, "a")["end"]), (6.0, 0.0)));
     }
 
     #[test]
@@ -1754,6 +1749,26 @@ mod tests {
         assert!(cuts[1].start_cut.is_none() && cuts[1].end_cut.is_none());
     }
 
+    /// [315] Verbinden wirkt auch bei grossem Abstand (vorher erst bis max(0.5 m, 2 × Wanddicke)): L-Ecke 1.7 m entfernt.
+    #[test]
+    fn verbinden_ohne_abstandslimit() {
+        let r = project(vec![wall("a", (0.0, 0.0), (4.3, 0.0), None), wall("b", (6.0, 0.5), (6.0, 4.0), None)], vec![], vec![]);
+        let p = typed(&r);
+        let ops = connect_ops(&r, &p, &["a".to_string(), "b".to_string()], &[]);
+        assert!(!ops.is_empty(), "Wände 1.7 m auseinander werden verbunden");
+        let out = apply(&r, ops);
+        let walls: Vec<&Value> = out["walls"].as_array().unwrap().iter().collect();
+        let ends: Vec<(f64, f64)> = walls.iter().flat_map(|w| [xy_of(&w["start"]), xy_of(&w["end"])]).collect();
+        assert!(ends.iter().filter(|e| close(**e, (6.0, 0.0))).count() >= 2, "beide Enden an der Ecke (6, 0): {ends:?}");
+        // T-Stoss bleibt T-Stoss: Ende weit weg von einer Durchgangswand rückt an deren Fläche, die Durchgangswand bleibt.
+        let r = project(vec![wall("a", (0.0, 0.0), (10.0, 0.0), None), wall("b", (5.0, 3.0), (5.0, 6.0), None)], vec![], vec![]);
+        let p = typed(&r);
+        let ops = connect_ops(&r, &p, &["a".to_string(), "b".to_string()], &[]);
+        let out = apply(&r, ops);
+        let a = out["walls"].as_array().unwrap().iter().find(|w| w["id"] == "a").unwrap();
+        assert!(close(xy_of(&a["start"]), (0.0, 0.0)) && close(xy_of(&a["end"]), (10.0, 0.0)), "Durchgangswand unverändert");
+    }
+
     #[test]
     fn verbinden_hinweis_nennt_den_grund() {
         let ids = ["a".to_string(), "b".to_string()];
@@ -1761,8 +1776,6 @@ mod tests {
             let r = project(ws, vec![], vec![]);
             join_hint(&typed(&r), &ids)
         };
-        // Zu weit auseinander: Abstand 1.7 m zur Ecke, Toleranz 0.5 m.
-        assert_eq!(hint(vec![wall("a", (0.0, 0.0), (4.3, 0.0), None), wall("b", (6.0, 0.0), (6.0, 4.0), None)]).as_deref(), Some("cmd.join.far|1.70|0.50"));
         // Parallel (versetzt).
         assert_eq!(hint(vec![wall("a", (0.0, 0.0), (4.0, 0.0), None), wall("b", (0.0, 1.0), (4.0, 1.0), None)]).as_deref(), Some("cmd.join.parallel"));
         // Treffen sich schon.
@@ -1985,8 +1998,8 @@ mod tests {
         assert!(none(vec![arc_wall("a", (0.0, 0.0), 5.0, 0.0, 90.0), wall("b", (0.0, 5.0), (0.0, 9.0), None)]));
         // Gerade trifft den Kreis auch verlängert nicht.
         assert!(none(vec![arc_wall("a", (0.0, 0.0), 5.0, 0.0, 85.0), wall("b", (-4.0, 9.0), (4.0, 9.0), None)]));
-        // Lücke weit über der Toleranz (45° ≈ 3.9 m Bogenlänge).
-        assert!(none(vec![arc_wall("a", (0.0, 0.0), 5.0, 0.0, 45.0), wall("b", (0.0, 5.3), (0.0, 9.0), None)]));
+        // [315] Grosse Lücke (45° ≈ 3.9 m Bogenlänge): wird jetzt verbunden (kein Abstandslimit mehr).
+        assert!(!none(vec![arc_wall("a", (0.0, 0.0), 5.0, 0.0, 45.0), wall("b", (0.0, 5.3), (0.0, 9.0), None)]));
         // Gleicher Kreis (das wäre Verketten) und konzentrische Kreise.
         assert!(none(vec![arc_wall("a", (0.0, 0.0), 5.0, 0.0, 80.0), arc_wall("b", (0.0, 0.0), 5.0, 90.0, 170.0)]));
         assert!(none(vec![arc_wall("a", (0.0, 0.0), 5.0, 0.0, 80.0), arc_wall("b", (0.0, 0.0), 6.0, 85.0, 170.0)]));
