@@ -87,6 +87,9 @@ pub struct PickSolid {
 pub struct PickStairMesh {
     pub tris: Vec<Tri>,
     pub stair_id: String,
+    /// [313] Absturzsicherung: Geschoss der Decke mit dem Loch (Pick folgt diesem, nicht dem der Treppe).
+    #[serde(skip)]
+    pub guard_floor: Option<String>,
 }
 
 /// [137] Flächige Pick-Form eines 2D-Elements, das im 3D keine Linie ist (Kreis, Bogen, Ellipse, Text): Welt-Dreiecke
@@ -282,7 +285,12 @@ pub fn pick_geometry(p: &Project) -> Result<PickGeometry, String> {
         solids: pick_solids(p),
         opening_meshes: pick_hosted_openings(p),
         drawings: pick_drawing_segs(p, &HashMap::new()),
-        stair_meshes: pick_stair_railings(p),
+        stair_meshes: {
+            // [313] Absturzsicherungen als eigene Einträge mit Geschoss der Decke (Filter, s. `retain_pick`).
+            let (mut m, guards) = pick_stair_railings_split(p);
+            m.extend(guards.into_iter().map(|(_, g)| g));
+            m
+        },
         drawing_meshes: pick_drawing_meshes(p, &HashMap::new()),
         trees: pick_trees(p),
         railings: pick_railings(p),
@@ -312,7 +320,7 @@ pub fn pick_stair_railings_split(p: &Project) -> (Vec<PickStairMesh>, Vec<(Strin
         let tris = extrusion_tris(&m.positions, &m.indices);
         match out.iter_mut().find(|o| o.stair_id == stair.id) {
             Some(o) => o.tris.extend(tris),
-            None => out.push(PickStairMesh { tris, stair_id: stair.id.clone() }),
+            None => out.push(PickStairMesh { tris, stair_id: stair.id.clone(), guard_floor: None }),
         }
     }
     // [155] Absturzsicherung gehört zur Treppe, die darin ankommt (pickbar mit ihr), steht aber auf dem Geschoss der Decke.
@@ -321,7 +329,7 @@ pub fn pick_stair_railings_split(p: &Project) -> (Vec<PickStairMesh>, Vec<(Strin
         let Some(stair) = p.stairs.as_deref().and_then(|v| v.get(si)) else { continue };
         let tris = extrusion_tris(&m.positions, &m.indices);
         if !tris.is_empty() {
-            guards.push((floor, PickStairMesh { tris, stair_id: stair.id.clone() }));
+            guards.push((floor.clone(), PickStairMesh { tris, stair_id: stair.id.clone(), guard_floor: Some(floor) }));
         }
     }
     out.retain(|o| !o.tris.is_empty());

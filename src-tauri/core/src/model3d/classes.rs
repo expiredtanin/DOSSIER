@@ -344,7 +344,7 @@ impl ClassFilter {
 
     /// Pick-Geometrie: ausgeblendete und gesperrte Elemente sind nicht anwählbar (graue schon, wie im Grundriss).
     pub fn retain_pick(&self, g: &mut PickGeometry) {
-        if self.pick.is_empty() {
+        if self.pick.is_empty() && self.floors.is_empty() {
             return;
         }
         let k = |id: &str| !self.pick.contains(id);
@@ -358,7 +358,11 @@ impl ClassFilter {
         g.solids.retain(|s| k(&s.solid_id));
         g.opening_meshes.retain(|o| k(&o.opening_id));
         g.drawings.retain(|d| k(&d.drawing_id));
-        g.stair_meshes.retain(|s| k(&s.stair_id));
+        // [313] Absturzsicherung folgt dem Geschoss der Decke (wie `keep_owner`); angewählt wird die Treppe.
+        g.stair_meshes.retain(|s| match &s.guard_floor {
+            Some(fl) => !self.floors.iter().any(|f| f == fl) && (k(&s.stair_id) || self.floor_only.contains(&s.stair_id)),
+            None => k(&s.stair_id),
+        });
         g.drawing_meshes.retain(|d| k(&d.drawing_id));
         g.trees.retain(|t| k(&t.tree_id));
         g.railings.retain(|t| k(&t.railing_id));

@@ -326,6 +326,26 @@ mod tests {
         assert_eq!(counts(r#"{"hide":["40"]}"#).1, 0, "Klasse der Treppe aus");
     }
 
+    /// [313] Pick folgt wie die Sichtbarkeit dem Geschoss der Decke; angewählt wird die Treppe.
+    #[test]
+    fn absturzsicherung_pick_folgt_dem_geschoss_der_decke() {
+        use crate::model3d::{pick_geometry, ClassFilter};
+        let p = with_hole();
+        let n = |text: &str| {
+            let mut g = pick_geometry(&p).unwrap();
+            ClassFilter::from_text(&p, text).retain_pick(&mut g);
+            let guards = g.stair_meshes.iter().filter(|m| m.guard_floor.is_some()).count();
+            (g.stair_meshes.len() - guards, guards, g.stair_meshes.iter().all(|m| m.stair_id == "ST1"))
+        };
+        let (hand, guard, ok) = n("");
+        assert!(guard > 0 && ok);
+        assert_eq!(n(r#"{"hideFloors":["og"]}"#).0, hand);
+        assert_eq!(n(r#"{"hideFloors":["og"]}"#).1, 0, "OG aus: Sicherung nicht anwählbar");
+        assert_eq!(n(r#"{"hideFloors":["eg"]}"#).0, 0);
+        assert_eq!(n(r#"{"hideFloors":["eg"]}"#).1, guard, "EG aus: Sicherung auf der OG-Decke bleibt anwählbar");
+        assert_eq!(n(r#"{"hideIds":["ST1"]}"#).1, 0, "Treppe aus: auch ihre Sicherung");
+    }
+
     /// IFC: eigenes Geländer (GUARDRAIL) an der Treppe, mit Länge als Basismenge.
     #[test]
     fn absturzsicherung_im_ifc_teil() {
