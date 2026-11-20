@@ -353,8 +353,6 @@ pub const SITUATION_MARGIN_MM: f64 = 60.0;
 /// [285] Rand um Baufeld (Parzelle samt Haus) im Situationsplan (Papier-mm; 1:500 ⇒ 10 m): der Ausschnitt zeigt die eigene Parzelle
 /// mit einem Streifen Nachbarschaft und Strasse, nicht alle Parzellen des Katasters als Kacheln.
 pub const SITUATION_PARCEL_MARGIN_MM: f64 = 20.0;
-/// [325] Massstäbe der Situation im Plakat, fein zuerst (so gross wie das Feld zulässt).
-const SITUATION_SCALES: [f64; 3] = [200.0, 250.0, 500.0];
 
 /// [208] Ausschnitt eines Inhalts (Modell-Meter): das Ausmass `b`, beschnitten auf die Bauteile `house` ± `margin`;
 /// ohne Bauteile (Schnitt/Ansicht) das ganze Ausmass.
@@ -377,21 +375,6 @@ fn situation_focus(house: Option<[f64; 4]>, parcel: Option<&[crate::model::Vec2]
     }
     let bb = pts.iter().fold([f64::MAX, f64::MAX, f64::MIN, f64::MIN], |m, q| [m[0].min(q.x), m[1].min(q.y), m[2].max(q.x), m[3].max(q.y)]);
     (Some(union(house, bb)), SITUATION_PARCEL_MARGIN_MM)
-}
-
-/// [325] Massstab der Situation: der feinste aus [`SITUATION_SCALES`] (nicht gröber als `requested`), bei dem der Ausschnitt
-/// (Baufeld ± Rand, im Ausmass `b`) höchstens 70 % der Feldbreite und 60 % der Feldhöhe füllt (das Plakat soll auf ein Blatt
-/// passen); sonst `requested`.
-fn situation_scale(b: [f64; 4], focus: Option<[f64; 4]>, margin_mm: f64, requested: f64, max_w: f64, max_h: f64) -> f64 {
-    SITUATION_SCALES
-        .iter()
-        .copied()
-        .filter(|c| *c <= requested)
-        .find(|c| {
-            let f = Frame::of(crop(b, focus, margin_mm * c / 1000.0), *c);
-            f.w <= max_w * 0.7 && f.h <= max_h * 0.6
-        })
-        .unwrap_or(requested)
 }
 
 fn union(a: Option<[f64; 4]>, b: [f64; 4]) -> [f64; 4] {
@@ -512,7 +495,9 @@ fn poster_plan(p: &Project, req: &Request, po: &PosterReq, sheet: &Sheet, kept: 
         // Höchstens die halbe Breite und knapp die halbe Höhe des Satzspiegels; beschnitten bleibt das Haus in der Mitte.
         let (max_w, max_h) = (g.span_w(g.cols.div_ceil(2)) - 2.0 * FRAME_PAD_MM, (g.height() - g.band) * 0.45 - 2.0 * FRAME_PAD_MM);
         // [325] Feld nutzen: der feinste Massstab (nicht unter 1:200), bei dem Parzelle samt Rand ins Feld passt.
-        let scale = situation_scale(b, focus, margin_mm, s.scale, max_w, max_h);
+        // [325] Massstab der Situation bleibt der gewählte (Wettbewerbe schreiben meist 1:500 vor; feiner würde die Nachbarn
+        // abschneiden, Entscheid Koordinator).
+        let scale = s.scale;
         let b = if scale == s.scale { b } else { crate::sheet_viewports::snapshot_extents(q, &ViewSnapshot { scale_denominator: scale, ..snap.clone() }, scale, Some(false)).map_or(b, |e| e.0) };
         let mut f = Frame::of(crop(b, focus, margin_mm * scale / 1000.0), scale);
         let hc = house.map(|h| ((h[0] + h[2]) / 2.0, (h[1] + h[3]) / 2.0));
@@ -838,20 +823,6 @@ mod tests {
             assert!((100.0..=200.0).contains(&scale), "{name}: Massstab {scale}");
             assert!(fill >= 0.55, "{name}: Belegung {fill:.2}");
         }
-    }
-
-    /// [325] Die Situation nutzt ihr Feld: der Massstab wird feiner als gewählt (nicht unter 1:200), solange Parzelle samt Rand
-    /// ins Feld passt; passt auch 1:500 nicht, bleibt er.
-    #[test]
-    fn situation_nutzt_das_feld() {
-        // Baufeld 40 × 30 m, Rand 20 mm; Ausmass gross genug.
-        let (b, focus) = ([-100.0, -100.0, 100.0, 100.0], Some([0.0, 0.0, 40.0, 30.0]));
-        // A0-Feld (400 × 400 mm, genutzt 280 × 240): 1:200 ergibt 240 × 190 mm.
-        assert_eq!(situation_scale(b, focus, 20.0, 500.0, 400.0, 400.0), 200.0);
-        // Kleines Feld (120 × 100 mm): nur 1:500.
-        assert_eq!(situation_scale(b, focus, 20.0, 500.0, 120.0, 100.0), 500.0);
-        // Gewählt ist 1:250: nicht gröber als gewählt wählbar? (200 und 250 erlaubt, 500 nicht).
-        assert_eq!(situation_scale(b, focus, 20.0, 250.0, 120.0, 100.0), 250.0);
     }
 
     #[test]
