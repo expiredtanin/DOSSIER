@@ -157,7 +157,8 @@ fn ansicht_oeffnungen_treppen_raster() {
     let p = project();
     let all = all_codes(&p);
     let opening = |v: &[Primitive]| v.iter().any(|q| matches!(q, Primitive::Polygon { opening_id: Some(_), .. }));
-    let stair = |v: &[Primitive]| v.iter().any(|q| matches!(q, Primitive::Polygon { ceiling_id: Some(id), .. } if id == "ST1"));
+    // [317] Treppen tragen in der Ansicht ihre eigene Pick-Id (`stair_id`), nicht mehr `ceiling_id`.
+    let stair = |v: &[Primitive]| v.iter().any(|q| matches!(q, Primitive::Polygon { stair_id: Some(id), .. } if id == "ST1"));
     let grid = |v: &[Primitive]| v.iter().any(|q| matches!(q, Primitive::DrawingCircle { drawing_id: Some(id), .. } if id == "raster"));
     let a = elevation(&p, &all);
     assert!(opening(&a) && stair(&a) && grid(&a));
