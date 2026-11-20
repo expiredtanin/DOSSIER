@@ -102,6 +102,7 @@ export { callAiTool } from "./aiTools";
 export type { AiHost } from "./aiTools";
 export { PRESENTATION_SCALES, POSTER_EXTRAS_DEFAULT, posterExtrasDefault, POSTER_SITUATION_SCALE, PRESENTATION_DEFAULT_SCALE, levelHasContent, PRESENTATION_TEMPLATE_ID, presentationDefaults, presentationSheetOps, planPresentationSheet, fittingPresentationScale, finerPresentationScale } from "../plan/presentationSheet";
 export type { PresentationOptions, PosterExtras, PosterTableKind, PresentationPlan, PresentationLabels } from "../plan/presentationSheet";
+export { buildLayoutSvg, presentationSheetLabels } from "../export/layoutSvg";
 export { lineEndsOf, lineEndsCode, lineEndsFromCode, lineEndsSvgAttrs, planLineEndsProps, MITER_LIMIT as LINE_MITER_LIMIT } from "../model/lineEnds";
 export type { LineEnds } from "../model/lineEnds";
 export type { LineCap, LineJoin } from "../model/types";

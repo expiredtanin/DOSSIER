@@ -99,7 +99,7 @@ function drawTitleBlock(
 /** Schrifthöhe in mm → pt (jsPDF misst Schriftgrössen in pt). */
 const MM_TO_PT = 72 / 25.4;
 
-function clip(s: string, max: number): string {
+export function clip(s: string, max: number): string {
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
 }
 
@@ -108,9 +108,10 @@ function clip(s: string, max: number): string {
  * derselbe Plan wie am Bildschirm (`generatePlan`, Massstab 1:1, Export-Modus), über
  * `planToPrintSvg` fest aufs Papier gelegt (Ursprung oben links), ohne eigenes weisses Blatt.
  */
-async function renderSheetDrawing(doc: jsPDF, project: Project, layout: Layout, widthMm: number, heightMm: number): Promise<void> {
+/** Druck-SVG der Blatt-Zeichnung (`null` ohne Zeichnungen) — gemeinsam für PDF und SVG-Blatt (`layoutSvg.ts`). */
+export function sheetDrawingPrint(project: Project, layout: Layout, widthMm: number, heightMm: number): SVGSVGElement | null {
   const level = sheetLevelOf(project, layout.id);
-  if (!level || !project.drawings2d.some((d) => d.levelId === level.id)) return;
+  if (!level || !project.drawings2d.some((d) => d.levelId === level.id)) return null;
   const a = sheetMmToModel(0, heightMm);
   const b = sheetMmToModel(widthMm, 0);
   const plan = generatePlan(
@@ -125,15 +126,20 @@ async function renderSheetDrawing(doc: jsPDF, project: Project, layout: Layout, 
     SHEET_SCALE_DENOMINATOR,
     true,
   );
-  const print = planToPrintSvg(plan, {
+  return planToPrintSvg(plan, {
     scaleDenominator: SHEET_SCALE_DENOMINATOR,
     pageWidthMm: widthMm,
     pageHeightMm: heightMm,
     bounds: { minX: a.x, minY: a.y, maxX: b.x, maxY: b.y },
     transparent: true,
-  });
-  await prepareSvgFonts(doc, print.svg);
-  await doc.svg(print.svg, { x: 0, y: 0, width: widthMm, height: heightMm });
+  }).svg;
+}
+
+async function renderSheetDrawing(doc: jsPDF, project: Project, layout: Layout, widthMm: number, heightMm: number): Promise<void> {
+  const svg = sheetDrawingPrint(project, layout, widthMm, heightMm);
+  if (!svg) return;
+  await prepareSvgFonts(doc, svg);
+  await doc.svg(svg, { x: 0, y: 0, width: widthMm, height: heightMm });
 }
 
 /** Optionen des Seiten-Aufbaus (Publikationssätze, [79]/[80]). */
@@ -209,6 +215,31 @@ function drawPosterHeaderPdf(doc: jsPDF, project: Project, layout: Layout, maste
   }
 }
 
+/**
+ * Plan-Quelle EINES Viewports (Ausschnitt, Massstab, Vorlage, Varianten) — gemeinsam für PDF ({@link renderPage}) und
+ * SVG-Blatt (`layoutSvg.ts`), damit beide dieselben Pläne zeigen. `null`, wenn der Ausschnitt fehlt.
+ */
+export function viewportPlanSource(project: Project, vp: Layout["viewports"][number], scaleOverride?: number) {
+  const snap = findSnapshot(project, vp.snapshotId);
+  if (!snap) return null;
+  const codes = visibleCodesFromSnapshot(snap);
+  // Massstab zuerst: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken
+  // nach Massstab) — wie ViewportPlan in LayoutSheet.tsx, sonst wiche das PDF von der Vorschau ab.
+  const scaleN = scaleOverride ?? resolveViewportScale(vp, snap);
+  // Geschoss/Zeichnung, Schnitt oder Ansicht ([115]) — wie ViewportPlanSvg, im Druck-Modus.
+  // [33] Override-Regeln des Ausschnitts bzw. seiner verknüpften Ansichtsvorlage (wie am Bildschirm).
+  const ruleIds = snapshotOverrideRuleIds(project, snap);
+  const template = snapshotTemplate(project, snap);
+  // [266] 3D-Ausschnitt: 3D-Dokument aus dem Kern (`viewportSnapshotPlan`).
+  // [272] Variantenkombination des Ausschnitts/Viewports.
+  const dopts = viewportDesignOptions(project, snap, vp);
+  const planOf = async (visible: Set<string>): Promise<Plan> =>
+    isDoc3dSnapshot(snap) ? viewportSnapshotPlan(project, snap, visible, scaleN, true, vp) : viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId, dopts);
+  // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte; was darüber hinausgeht, schneidet der Rahmen ab.
+  const centered = viewportCenterBounds(vp, scaleN);
+  return { snap, codes, scaleN, planOf, centered };
+}
+
 /** Zeichnet die Viewports + Master-Elemente EINER Seite in das jsPDF-Dokument. */
 async function renderPage(
   doc: jsPDF,
@@ -221,23 +252,10 @@ async function renderPage(
 
   // Echte Viewport-Pläne (wie ViewportPlan in LayoutSheet.tsx).
   for (const vp of layout.viewports) {
-    const snap = findSnapshot(project, vp.snapshotId);
-    if (!snap) continue;
+    const src = viewportPlanSource(project, vp, ctx.scaleOverride);
+    if (!src) continue;
     try {
-      const codes = visibleCodesFromSnapshot(snap);
-      // Massstab zuerst: er geht in die Plan-Erzeugung ein (Bemassung in Papier-mm, Strichstärken
-      // nach Massstab) — wie ViewportPlan in LayoutSheet.tsx, sonst wiche das PDF von der Vorschau ab.
-      const scaleN = ctx.scaleOverride ?? resolveViewportScale(vp, snap);
-      // Geschoss/Zeichnung, Schnitt oder Ansicht ([115]) — wie ViewportPlanSvg, im Druck-Modus.
-      // [33] Override-Regeln des Ausschnitts bzw. seiner verknüpften Ansichtsvorlage (wie am Bildschirm).
-      const ruleIds = snapshotOverrideRuleIds(project, snap);
-      const template = snapshotTemplate(project, snap);
-      // [266] 3D-Ausschnitt: 3D-Dokument aus dem Kern (`viewportSnapshotPlan`).
-      // [272] Variantenkombination des Ausschnitts/Viewports.
-      const dopts = viewportDesignOptions(project, snap, vp);
-      const planOf = (visible: Set<string>) => (isDoc3dSnapshot(snap) ? viewportSnapshotPlan(project, snap, visible, scaleN, true, vp) : viewportLevelPlan(project, snap.activeLevelId, visible, snap.detail, scaleN, true, snapshotMono(project, snap), ruleIds, template, snap.modelViewOptionId, dopts));
-      // [208] Eigene Bildmitte (Plakat): Ausschnitt um die Mitte; was darüber hinausgeht, schneidet der Rahmen ab.
-      const centered = viewportCenterBounds(vp, scaleN);
+      const { codes, scaleN, planOf, centered } = src;
       const draw = async (plan: Plan, transparent: boolean, bounds?: Plan["bounds"]) => {
         const print = planToPrintSvg(plan, { scaleDenominator: scaleN, pageWidthMm: vp.widthMm, pageHeightMm: vp.heightMm, transparent, bounds: centered ?? bounds });
         await prepareSvgFonts(doc, print.svg);

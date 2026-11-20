@@ -35,6 +35,9 @@
 //                                                  [--scale 200] [--hatch] [--color] [--format svg|json|dxf|dxfbin|dwg] [--out axo.svg]
 //                                                  [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten aus dem Kern
 //                                                  (Linienzeichnung, Silhouette kräftig, Flächen nach Lage grau; ohne GPU)
+//   dossier-cli <projekt.obp> sheet [--name "Blatt"|--index N|--list] [--create-presentation [--poster poster-a0-portrait] [--scale 200]] --out blatt.svg
+//                                                  [323] Layout-Blatt (Viewports, Schriftfeld/Plakat-Kopfzeile, Tabellen) wie der PDF-Export der App, als SVG;
+//                                                  --create-presentation legt vorher das Präsentationsblatt (bzw. Plakat) an wie der Befehl `praesentationsplan`
 //   dossier-cli <projekt.obp> ifc [--ebkph] [--ebenen] [--kontext] [--entourage]   (IFC mit eBKP-H-Hauptgruppen bzw. Modell-Ebenen als Klassifikation; --kontext: Gelände/Nachbarn mitgeben; --entourage: Person/Velo/Auto als Proxy, Möbel gehen immer als IfcFurniture)
 //                                                  --schema 4|2x3: IFC4 (Standard) oder IFC2x3 (Coordination View 2.0)
 //   dossier-cli <projekt.obp> dxf [--binary] [--scale 100] [--dim-unit cm] [--layout]|dwg|ifc|step|obj [--no-mtl]|stl|glb|gltf|schedule [--openings|--elements|--rooms] [--format json|csv|svg|pdf]|kennzahlen [--sia416] [--ivhb] [--nachweis] [--wohnungsspiegel] [--format json|csv|svg|pdf] [--agsf m2] [--gruenflaeche m2] [--agf-basis gf|ngf|nf] [--untergeschosse]|raumprogramm [--import tabelle] [--sheet name|nr] [--mode replace|append] [--tolerance %] [--generate] [--format json|csv|svg|pdf] [--save projekt.obp]|sun [--level EG] [--out datei]
@@ -205,6 +208,12 @@ import {
   buildCyclesPackage,
   runCyclesRender,
   CyclesMissingError,
+  buildLayoutSvg,
+  presentationSheetLabels,
+  presentationDefaults,
+  presentationSheetOps,
+  posterExtrasDefault,
+  fittingPresentationScale,
 } from "../core";
 import type { BlenderHost, CyclesHost, ExportView, Filter3d, Project, RenderMode, RenderPackage, RenderViewPreset, TextureLoader, ViewTemplate } from "../core";
 import { serveStdio } from "./mcp";
@@ -1265,6 +1274,45 @@ async function execute(project: Project, file: string, command: string, rest: st
         return 0;
       }
       out(args, planToSvgString(plan, { scaleDenominator: tv.scale, hatch: args.flags.has("hatch") && args.flags.get("hatch") !== "false" }), `${lvl.name}.svg`);
+      return 0;
+    }
+    case "sheet":
+    case "layout": {
+      // [323] Layout-Blatt als SVG (Viewports, Schriftfeld/Kopfzeile, Tabellen) über denselben Weg wie der PDF-Export der App.
+      const target = args.flags.get("out");
+      if (target && /\.pdf$/i.test(target)) fail("sheet: PDF braucht ein DOM (jsPDF/svg2pdf, nur App/Browser) — headless als .svg ausgeben");
+      let sheetProject = project;
+      let pickId: string | undefined;
+      if (args.flags.has("create-presentation")) {
+        const poster = args.flags.get("poster");
+        const base = presentationDefaults(project);
+        const sc = args.flags.get("scale");
+        const o = { ...base, ...(poster && poster !== "true" ? { poster, extras: posterExtrasDefault(project) } : {}), ...(sc ? { scale: Number(sc) } : {}) };
+        const format = `${o.paper.toUpperCase()} ${o.orientation === "landscape" ? "quer" : "hoch"}`;
+        const res = withDocument(project, () => presentationSheetOps(project, o, presentationSheetLabels(format), "cli"));
+        if (!res) fail("sheet: kein Geschoss mit Inhalt — Präsentationsblatt nicht erzeugt");
+        if (!res.plan.fits) fail(`sheet: Inhalt passt bei 1:${res.plan.scale} nicht aufs Blatt (grösseren Nenner wählen: --scale ${fittingPresentationScale(project, o) ?? "…"})`);
+        sheetProject = applyOps(project, res.ops);
+        pickId = res.layoutId;
+        process.stderr.write(`Präsentationsblatt angelegt: ${res.layoutIds.join(", ")} (Massstab 1:${res.plan.scale})\n`);
+      }
+      const layouts = sheetProject.layouts ?? [];
+      if (args.flags.has("list")) {
+        layouts.forEach((l, i) => process.stdout.write(`${i + 1}\t${l.id}\t${l.name}\t${l.paper} ${l.orientation}\t${l.viewports.length} Viewports\n`));
+        return 0;
+      }
+      const name = args.flags.get("name");
+      const idx = args.flags.get("index");
+      let found: (typeof layouts)[number] | undefined = layouts[0];
+      if (name && name !== "true") found = layouts.find((l) => l.id === name || l.name.toLowerCase() === name.toLowerCase());
+      else if (idx && idx !== "true") found = layouts[Number(idx) - 1];
+      else if (pickId) found = layouts.find((l) => l.id === pickId);
+      if (!found) fail(`Blatt nicht gefunden: ${name ?? idx ?? "(erstes)"} (vorhanden: ${layouts.map((l) => l.name).join(", ") || "keine"})`);
+      const layout = found;
+      const scaleFlag = args.flags.get("scale");
+      const res = await withDocument(sheetProject, () => buildLayoutSvg(sheetProject, layout, { scaleOverride: !args.flags.has("create-presentation") && scaleFlag && scaleFlag !== "true" ? Number(scaleFlag) : undefined }));
+      for (const w of res.warnings) process.stderr.write(`Warnung: ${w}\n`);
+      out(args, res.svg, `${layout.name}.svg`);
       return 0;
     }
     case "axo": {

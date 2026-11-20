@@ -35,6 +35,27 @@ describe("[66] Präsentationsplan", () => {
     project = st().project;
   });
 
+  // [323] Achskreise und Masszahlen der Aussenbemassung ragen über das Plan-Ausmass hinaus: der Rahmen lässt 8 mm Rand, nicht 4.
+  it("[323] Präsentationsplan: Rahmen der Grundrisse mit 8 mm Rand um das gemeinsame Ausmass", () => {
+    const o = { ...presentationDefaults(project), scale: 200 };
+    const plan = planPresentationSheet(project, o);
+    const res = presentationSheetOps(project, o, LABELS, "p323")!;
+    st().applyChange(res.ops);
+    const q = st().project;
+    let h = 0;
+    let w = 0;
+    for (const f of plan.items.filter((i) => q.drawingLevels.find((l) => l.id === i.levelId)?.kind === "floor")) {
+      const snap = q.viewSnapshots!.find((v) => v.id === `vs-pres-p323-${plan.items.indexOf(f)}`)!;
+      const vis = new Set(Object.entries(snap.layerVisibility).filter(([, v]) => v).map(([k]) => k));
+      const b = generatePlan(q, f.levelId, vis, undefined, snap.detail, false, true, true, 200, false, false).bounds;
+      h = Math.max(h, ((b.maxY - b.minY) * 1000) / 200);
+      w = Math.max(w, ((b.maxX - b.minX) * 1000) / 200);
+    }
+    const eg = plan.items.find((i) => q.drawingLevels.find((l) => l.id === i.levelId)?.kind === "floor")!;
+    expect(eg.heightMm).toBeGreaterThanOrEqual(h + 16 - 1e-6);
+    expect(eg.widthMm).toBeGreaterThanOrEqual(w + 16 - 1e-6);
+  });
+
   it("Vorschlag: alle Geschosse, Ansichten, ein Schnitt, A1 quer (Master)", () => {
     const d = presentationDefaults(project);
     expect(d.floors.length).toBeGreaterThanOrEqual(4);

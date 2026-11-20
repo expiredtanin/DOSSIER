@@ -15,6 +15,9 @@ use std::collections::BTreeMap;
 pub const SCALES: [f64; 5] = [50.0, 100.0, 200.0, 500.0, 1000.0];
 /// Rand zwischen Inhalt und Viewport-Rahmen (mm).
 pub const FRAME_PAD_MM: f64 = 4.0;
+/// [323] Rand im Präsentationsplan (kein Plakat): Achskreise und Masszahlen der Aussenbemassung stehen über dem Ausmass der
+/// Ansicht hinaus (Plan-Grenzen zählen nur ihre Ankerpunkte); bei 4 mm schnitt der Rahmen sie oben ab (Komplex-Erdgeschoss).
+pub const SHEET_PAD_MM: f64 = 8.0;
 /// Abstand zwischen Rahmen (mm).
 pub const GAP_MM: f64 = 12.0;
 /// Platz für den Titel unter jedem Rahmen (mm).
@@ -74,8 +77,8 @@ fn pack_from(items: &[(u32, f64, f64)], sheet: &Sheet, y0: f64, strict: bool) ->
     while i < items.len() {
         let g = items[i].0;
         let j = i + items[i..].iter().take_while(|it| it.0 == g).count();
-        let cw = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.1)) + 2.0 * FRAME_PAD_MM;
-        let ch = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.2)) + 2.0 * FRAME_PAD_MM;
+        let cw = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.1)) + 2.0 * SHEET_PAD_MM;
+        let ch = items[i..j].iter().fold(0.0_f64, |m, it| m.max(it.2)) + 2.0 * SHEET_PAD_MM;
         let mut k = i;
         while k < j {
             let row_bottom = y + ch + TITLE_MM;
@@ -606,11 +609,11 @@ mod tests {
         assert!(c.rects[4].y_mm > c.rects[0].y_mm);
     }
 
-    /// Grosser Bau auf A3: 1:100 passt nicht, 1:200 auch nicht, 1:500 schon.
+    /// Grosser Bau auf A3: 1:100 passt nicht, 1:200 auch nicht, 1:500 schon (Rand 8 mm je Seite, [323]).
     #[test]
     fn kleines_blatt_waehlt_kleineren_massstab() {
         let s = Sheet::new(420.0, 297.0, true);
-        let c = choose(|sc| (0..3).map(|g| (g, 60000.0 / sc, 30000.0 / sc)).collect(), &s);
+        let c = choose(|sc| (0..3).map(|g| (g, 55000.0 / sc, 27000.0 / sc)).collect(), &s);
         assert!(c.fits);
         assert_eq!(c.scale, 500.0);
         check(&c.rects, &s);
