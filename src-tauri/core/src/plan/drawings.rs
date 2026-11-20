@@ -940,7 +940,12 @@ fn emit_inner(c: &Ctx, d: &Drawing2D, attrs: Attrs, geom: &Drawing2DGeom, greyed
             let text_x = at.x - radius * 0.62;
             em.text(v(text_x, at.y + radius * 0.32), label.clone(), text_h);
             if !lower.is_empty() {
-                em.text(v(text_x, at.y - radius * 0.68), lower.to_string(), text_h);
+                // [325] Passt der Name nicht in den Kreis (ca. 0.55 Schrifthöhen je Zeichen), steht er rechts daneben.
+                if lower.chars().count() as f64 * text_h * 0.55 > radius * 1.5 {
+                    em.text(v(at.x + radius + text_h * 0.5, at.y - text_h * 0.35), lower.to_string(), text_h);
+                } else {
+                    em.text(v(text_x, at.y - radius * 0.68), lower.to_string(), text_h);
+                }
             }
         }
         Drawing2DGeom::Scalebar { at, segment_length, segments } => {
@@ -2959,6 +2964,22 @@ mod tests {
             let half = extent(&render(&p, d, 50.0));
             assert!((half - model * 0.5).abs() < 1e-9, "{geom}: {model} → {half}");
         }
+    }
+
+    /// [325] Detailverweis: ein langer Blattname steht neben dem Kreis, nicht über seiner Linie; kurze Angaben bleiben im Kreis.
+    #[test]
+    fn detailverweis_langer_name_neben_dem_kreis() {
+        let p = project(serde_json::json!({}));
+        let texts = |lbl: &str| -> (Vec<(Vec2, String)>, f64) {
+            let prims = render(&p, drawing(serde_json::json!({"shape": "detailref", "at": {"x": 0.0, "y": 0.0}, "label": "1", "sheetLabel": lbl})), 100.0);
+            let r = prims.iter().find_map(|q| if let Primitive::DrawingCircle { r, .. } = q { Some(*r) } else { None }).unwrap();
+            (prims.iter().filter_map(|q| if let Primitive::DrawingText { at, text, .. } = q { Some((*at, text.clone())) } else { None }).collect(), r)
+        };
+        let (short, r) = texts("501");
+        assert!(short.iter().all(|(a, _)| a.x < r), "kurze Angabe im Kreis");
+        let (long, r) = texts("Detail und Situation");
+        let (at, _) = long.iter().find(|(_, t)| t.starts_with("Detail")).unwrap();
+        assert!(at.x >= r - 1e-9, "langer Name rechts neben dem Kreis: {} / {r}", at.x);
     }
 
     /// [112] Achsraster: strichpunktierte Achsen, Blasen (Kreis + Beschriftung) an beiden Enden,

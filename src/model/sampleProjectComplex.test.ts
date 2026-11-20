@@ -114,4 +114,23 @@ describe("Musterhaus komplex", () => {
       for (const t of sheetTables(p, layout.id)) expect(t.total, t.id).toBeGreaterThan(0);
     }
   });
+
+  // [325] Handgesetzte Masskette und automatische Aussenbemassung teilen nie dieselbe Masslinie (Zahlen überlagerten sich).
+  it("EG: keine Massketten auf derselben Linie", () => {
+    type D = { id: string; levelId: string; geom: { shape: string; pts?: { x: number; y: number }[]; offset?: number } };
+    const lines = (p.drawings2d as unknown as D[])
+      .filter((d) => d.levelId === "eg" && d.geom.shape === "dimension" && d.geom.pts && d.geom.pts.length > 1)
+      .filter((d) => d.geom.pts!.every((q) => Math.abs(q.y - d.geom.pts![0].y) < 1e-9))
+      .map((d) => {
+        const pts = d.geom.pts!, off = d.geom.offset ?? 0;
+        const y = pts[0].y + (d.id.includes("-south-") ? -off : off);
+        const xs = pts.map((q) => q.x);
+        return { id: d.id, y, x0: Math.min(...xs), x1: Math.max(...xs) };
+      });
+    for (const [i, a] of lines.entries()) {
+      for (const b of lines.slice(i + 1)) {
+        if (a.x0 < b.x1 && b.x0 < a.x1) expect(Math.abs(a.y - b.y), `${a.id} / ${b.id}`).toBeGreaterThan(0.6);
+      }
+    }
+  });
 });

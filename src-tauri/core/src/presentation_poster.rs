@@ -232,7 +232,7 @@ fn image_slot(g: &Grid, busy: &Busy, pages: usize, min_h: f64) -> Option<(usize,
                         continue;
                     }
                     let free = Rect { x_mm: x0, y_mm: y1, width_mm: x1 - x0, height_mm: y2 - y1 };
-                    let r = cap_image(free, false);
+                    let r = cap_image(free);
                     if best.as_ref().is_none_or(|b| r.width_mm * r.height_mm > b.0 + 1e-6) {
                         best = Some((r.width_mm * r.height_mm, page, r));
                     }
@@ -274,7 +274,7 @@ fn layout_variant(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bo
             tops.push((st.page, st.y, st.line));
             if beside && grp.image_beside && k == 0 && image && out.image.is_none() && g.cols >= col + 2 {
                 let free = Rect { x_mm: g.col_x(col), y_mm: st.y, width_mm: g.span_w(g.cols - col), height_mm: lh - g.band };
-                let rect = cap_image(free, true);
+                let rect = cap_image(free);
                 beside_free = Some(free);
                 busy.push((st.page, rect));
                 out.image = Some(Placed { page: st.page, rect, forced: false, line: st.line });
@@ -364,7 +364,7 @@ fn layout_variant(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bo
         let bottom = out.items.iter().filter(|p| p.page == page).map(|p| p.rect.y_mm + p.rect.height_mm + g.band).chain(out.tables.iter().filter(|p| p.page == page).map(|p| p.rect.y_mm + p.rect.height_mm)).fold(img.rect.y_mm + img.rect.height_mm, f64::max);
         let pf = out.items.iter().chain(&out.tables).any(|p| p.page == page && p.forced);
         let slack = g.bottom - bottom - (lines + 1.0) * g.gutter;
-        let grown = cap_image(Rect { height_mm: free.height_mm + slack.max(0.0), ..free }, true);
+        let grown = cap_image(Rect { height_mm: free.height_mm + slack.max(0.0), ..free });
         let delta = (grown.height_mm - free.height_mm).max(0.0);
         if !pf && grown.height_mm > img.rect.height_mm + 1e-6 {
             for p in out.items.iter_mut().chain(out.tables.iter_mut()).filter(|p| p.page == page && p.line > img.line) {
@@ -379,11 +379,12 @@ fn layout_variant(g: &Grid, groups: &[Group], tables: &[(usize, f64)], image: bo
 }
 
 /// [285] Bild-Rahmen in der freien Fläche: sie darf ganz gefüllt werden, nur das Seitenverhältnis bleibt in 1 : 1.5 … 2 : 1 (sonst
-/// schrumpft die lange Seite); `right`: rechtsbündig, sonst waagrecht zentriert; oben bündig.
-fn cap_image(free: Rect, right: bool) -> Rect {
+/// schrumpft die lange Seite); linksbündig an der Spaltenkante (Titel fluchten mit den Rahmen
+/// darüber/darunter, [325]); oben bündig.
+fn cap_image(free: Rect) -> Rect {
     let h = free.height_mm.min(free.width_mm * 1.5);
     let w = free.width_mm.min(h * 2.0);
-    let x = if right { free.x_mm + free.width_mm - w } else { free.x_mm + (free.width_mm - w) / 2.0 };
+    let x = free.x_mm;
     Rect { x_mm: x, y_mm: free.y_mm, width_mm: w, height_mm: h }
 }
 
@@ -440,6 +441,13 @@ mod tests {
         (0..n).map(|_| Cell { span, w, h }).collect()
     }
 
+    /// [325] Das Bild ohne Platz neben der Situation steht linksbündig an der Spaltenkante (nicht zentriert/eingerückt).
+    #[test]
+    fn bild_linksbuendig() {
+        let free = Rect { x_mm: 20.0, y_mm: 100.0, width_mm: 400.0, height_mm: 150.0 };
+        assert_eq!(cap_image(free).x_mm, 20.0);
+    }
+
     #[test]
     fn spalten_und_breiten() {
         let g = a1();
@@ -468,10 +476,10 @@ mod tests {
         assert_eq!(r.pages, 1);
         check(&g, &r);
         let it = &r.items;
-        // Bild neben der Situation, gleiche Oberkante, rechtsbündig im Rest der Breite.
+        // Bild neben der Situation, gleiche Oberkante, linksbündig an einer Spaltenkante im Rest der Breite ([325]: Titel fluchtet mit den Tabellen).
         let img = r.image.expect("Bild");
         assert_eq!(img.rect.y_mm, it[0].rect.y_mm);
-        assert!(img.rect.x_mm >= g.col_x(2) - 1e-9 && (img.rect.x_mm + img.rect.width_mm - (g.left + g.span_w(g.cols))).abs() < 1e-9);
+        assert!(img.rect.x_mm >= g.col_x(2) - 1e-9 && (0..g.cols).any(|c| (img.rect.x_mm - g.col_x(c)).abs() < 1e-9) && img.rect.x_mm + img.rect.width_mm <= g.left + g.span_w(g.cols) + 1e-9);
         // Grundrisse: eine Zeile, gleiche Oberkante, unter der Situation, an Spaltenkanten, so breit wie der Inhalt.
         assert!(it[1..4].iter().all(|p| p.rect.y_mm == it[1].rect.y_mm && p.rect.width_mm == 150.0));
         assert_eq!(it[1..4].iter().map(|p| p.rect.x_mm).collect::<Vec<_>>(), vec![g.col_x(0), g.col_x(2), g.col_x(4)]);

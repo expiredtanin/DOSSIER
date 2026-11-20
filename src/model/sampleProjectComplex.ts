@@ -608,7 +608,7 @@ function annotations(): Drawing2D[] {
     refs: [{ id: "eg-aw-w", feature: "wall", index: 4, t: 0.88 }, { id: "eg-iw-x6", feature: "wall", index: 0, t: 0.12 }],
   });
   add("mass-fenster-eg", "eg", "80", {
-    shape: "dimension", pts: [P(1.6, -1.2), P(3.4, -1.2), P(7.0, -1.2), P(10.0, -1.2)], offset: 0,
+    shape: "dimension", pts: [P(1.6, -5.4), P(3.4, -5.4), P(7.0, -5.4), P(10.0, -5.4)], offset: 0,
     refs: [
       { id: "eg-f1", feature: "opening", index: 0 }, { id: "eg-f1", feature: "opening", index: 1 },
       { id: "eg-t-hst", feature: "opening", index: 0 }, { id: "eg-t-hst", feature: "opening", index: 1 },
