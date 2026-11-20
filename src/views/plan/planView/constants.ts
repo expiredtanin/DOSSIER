@@ -75,6 +75,39 @@ export function gripSquareHalfPx(insert: boolean, hover: boolean): number {
   const base = insert ? 3 : 4;
   return hover ? base + 1.5 : base;
 }
+
+/**
+ * [314] Zoom-Faktor der Griffe (Eckpunkte, Kanten-Dreiecke): beim Herauszoomen kleiner, beim Hineinzoomen leicht
+ * grösser — `meet` = Pixel je Planeinheit jetzt, `ref` = in der eingepassten Ansicht. Vorher Exponent 0.2 und
+ * Untergrenze 0.7: herausgezoomt blieben die Quadrate fast gleich gross und deckten kleine Elemente zu.
+ */
+export function gripZoomK(meet: number, ref: number): number {
+  if (!(meet > 0 && ref > 0)) return 1;
+  return Math.min(1.25, Math.max(0.4, Math.pow(meet / ref, 0.35)));
+}
+
+/**
+ * [314] Dichte-Faktor: liegen Griffe auf dem Bildschirm enger als etwa fünf Quadrat-Halbbreiten beieinander
+ * (kleines Element weit herausgezoomt), werden sie entsprechend kleiner (bis 40 %), statt sich zu überdecken.
+ * `minDistPx` = kleinster Bildschirmabstand zweier Griffe, `halfPx` = Halbbreite ohne Dichte-Faktor.
+ */
+export function gripCrowdK(minDistPx: number, halfPx: number): number {
+  if (!(minDistPx >= 0) || !(halfPx > 0) || !Number.isFinite(minDistPx)) return 1;
+  return Math.min(1, Math.max(0.4, minDistPx / (5 * halfPx)));
+}
+
+/** Kleinster Abstand zweier Punkte (gleiche Einheit wie die Eingabe); bei mehr als `max` Punkten `Infinity`. */
+export function minPairDistance(pts: readonly { x: number; y: number }[], max = 300): number {
+  if (pts.length < 2 || pts.length > max) return Infinity;
+  let m = Infinity;
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const d = Math.hypot(pts[i].x - pts[j].x, pts[i].y - pts[j].y);
+      if (d > 1e-9 && d < m) m = d;
+    }
+  }
+  return m;
+}
 // Toleranz (Bildschirm-Pixel) für die Linien-Auswahl von 2D-Zeichenelementen.
 export const LINE_PICK_PX = 6;
 

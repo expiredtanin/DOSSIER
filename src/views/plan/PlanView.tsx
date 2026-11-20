@@ -38,7 +38,7 @@ import { planTextEntries } from "../../core";
 import { EMPTY_SELECTION, single } from "../../state/selection";
 import { useCursorValue, type CursorStore } from "../../state/cursorStore";
 import type { HatchedPoly, PlanViewHandle, PlanViewProps } from "./planView/types";
-import { IS_MAC, gripSquareHalfPx } from "./planView/constants";
+import { IS_MAC, gripSquareHalfPx, gripCrowdK, minPairDistance } from "./planView/constants";
 import { usePlanEngine } from "./planView/usePlanEngine";
 import { usePlanCoords } from "./planView/usePlanCoords";
 import { usePlanPicking } from "./planView/usePlanPicking";
@@ -1070,7 +1070,7 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
         const c2 = toLocal({ x: groupBBox.maxX, y: groupBBox.minY });
         const c3 = toLocal({ x: groupBBox.maxX, y: groupBBox.maxY });
         const c4 = toLocal({ x: groupBBox.minX, y: groupBBox.maxY });
-        const half = gripSquareHalfPx(false, false) / meet;
+        const half = (gripSquareHalfPx(false, false) * gripK(meet)) / meet; // [314] zoomabhängig
         const corners = [c1, c2, c3, c4];
         return (
           <>
@@ -1174,13 +1174,18 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
           kleinere hohle Quadrate. Sichtbare Form bewusst kleiner als der Treffer-Radius (GRIP_HIT_PX). */}
       {gripsActive && (
         <LiveMeet store={meetStore} base={meetScale(view, canvasRef.current ?? svgRef.current) ?? 1}>
-          {(meet) =>
+          {(meet) => {
             // Viele Griffe (Kataster): nur die sichtbaren zeichnen (gripCull.ts).
-            (visibleGripIndices(grips!, toScreen, view, meet) ?? grips!.map((_, i) => i)).map((i) => {
+            const idx = visibleGripIndices(grips!, toScreen, view, meet) ?? grips!.map((_, i) => i);
+            // [314] Grösse: zoomabhängig (gripK) und bei eng liegenden Griffen (kleines Element, weit herausgezoomt)
+            // zusätzlich kleiner, statt dass die Quadrate das Element zudecken. Abstand in Bildschirm-px.
+            const k = gripK(meet);
+            const crowd = gripCrowdK(minPairDistance(idx.map((i) => toLocal(grips![i]))) * meet, gripSquareHalfPx(false, false) * k);
+            return idx.map((i) => {
               const s = toLocal(grips![i]);
               const insert = !!(grips![i] as { insert?: boolean }).insert;
               const hover = hoverGrip === i;
-              const half = gripSquareHalfPx(insert, hover) / meet;
+              const half = (gripSquareHalfPx(insert, hover) * k * (hover ? 1 : crowd)) / meet;
               return (
                 <rect
                   key={`grip-${i}`}
@@ -1192,8 +1197,8 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
                   pointerEvents="none"
                 />
               );
-            })
-          }
+            });
+          }}
         </LiveMeet>
       )}
       {/* Raum-Stempel-Griff: eine ziehbare Raute am Anker des gewählten Raums.

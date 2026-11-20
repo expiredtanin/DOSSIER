@@ -3,7 +3,7 @@
 // Standard-Auswahl (`defaultPick`). Aufgerufen einmal von `PlanView`.
 
 import type { MeetStore, ValueStore } from "./liveMeet";
-import { cycleModifier, MARQUEE_THRESHOLD_PX, EMPTY_PICK } from "./constants";
+import { cycleModifier, MARQUEE_THRESHOLD_PX, EMPTY_PICK, gripZoomK } from "./constants";
 import { useRef, useEffect } from "react";
 import type { ViewBox__plan_planView_geometry as ViewBox } from "../../../core";
 import { localViewBoxAttr } from "./overlayOrigin";
@@ -423,13 +423,12 @@ export function usePlanPointer(inp: UsePlanPointerArgs) {
     }
   }, [view, meetStore, viewStore]);
   /**
-   * Griff-Grösse in Bildschirm-px: bewusst nur SCHWACH zoomabhängig (Exponent 0.2,
-   * begrenzt) — kein hartes Konstant-Bleiben, damit man an den Griffen noch merkt,
-   * ob man nah oder weit weg ist, aber ohne dass sie beim Zoomen mitwachsen.
+   * Griff-Faktor auf die Bildschirm-px-Grösse: zoomabhängig ([314] `gripZoomK`, Exponent 0.35, 0.4…1.25) —
+   * herausgezoomt deutlich kleiner, damit die Griffe kleine Elemente nicht zudecken; hineingezoomt kaum grösser.
    */
   const gripK = (meet: number): number => {
     const ref = meetScale(defaultView, canvasRef.current ?? svgRef.current) ?? meet;
-    return Math.min(1.4, Math.max(0.7, Math.pow(meet / ref, 0.2)));
+    return gripZoomK(meet, ref); // [314] herausgezoomt deutlich kleiner (vorher Exponent 0.2, min 0.7)
   };
   /** Anhängigen imperativen Pan in React-State übernehmen (+ Transform lösen). */
   const commitPan = () => {
