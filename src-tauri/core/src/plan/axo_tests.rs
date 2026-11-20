@@ -266,7 +266,7 @@ fn axo_zeit() {
     let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let a = args(serde_json::json!({"view": "southeast"}), &p);
     let t = std::time::Instant::now();
-    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, 100.0).unwrap().unwrap();
+    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, true, 100.0).unwrap().unwrap();
     eprintln!("Flächen: {} in {:?}", prep.faces.len(), t.elapsed());
     let t = std::time::Instant::now();
     let segs = hlr::hidden_lines(&prep.faces, &hlr::Opts { tol: 1e-4, depth_eps: 1e-4, hidden: false, ..hlr::Opts::default() });
@@ -382,7 +382,7 @@ fn fenster_mit_rahmen_und_glas() {
     let p: Project = serde_json::from_str(include_str!("../../tests/fixtures/robust/wettbewerb.json")).unwrap();
     let a = args(serde_json::json!({"view": "southeast"}), &p);
     let parts = |scale: f64| {
-        let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, scale).unwrap().expect("Flächen");
+        let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, true, scale).unwrap().expect("Flächen");
         let n = |glass: bool| prep.faces.iter().filter(|f| refs.get(f.owner as usize).is_some_and(|r| r.opening && r.glass == glass)).count();
         (n(false), n(true))
     };
@@ -401,6 +401,62 @@ fn fenster_mit_rahmen_und_glas() {
     codes.sort();
     codes.dedup();
     let off = args(serde_json::json!({"view": "southeast", "hasVis": true, "invisible": codes}), &p);
-    let (prep, refs) = prepare(&p, &off.proj, &off.vis, false, 100.0).unwrap().expect("Flächen");
+    let (prep, refs) = prepare(&p, &off.proj, &off.vis, false, true, 100.0).unwrap().expect("Flächen");
     assert!(prep.faces.iter().all(|f| !refs.get(f.owner as usize).is_some_and(|r| r.opening)));
+}
+
+/// [307] Gelände: Rechteck 13 × 13 m auf Höhe 0 (zwei Dreiecke), Klasse „02“.
+fn with_terrain(mut p: Project) -> Project {
+    let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![-6.0, -6.0, 0.0, 7.0, -6.0, 0.0, 7.0, 7.0, 0.0, -6.0, 7.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+    p.context = Some(vec![ContextObject::TerrainMesh(t)]);
+    p.layers.push(serde_json::from_value(serde_json::json!({"code": "02", "name": "Gelände", "color": "#000", "lw": 0.5, "visible": true, "locked": false})).unwrap());
+    p
+}
+
+fn terrain_fills(prims: &[Primitive]) -> usize {
+    prims.iter().filter(|q| matches!(q, Primitive::Polygon { context_object_id: Some(id), .. } if id == "t")).count()
+}
+
+#[test]
+fn gelaende_flaeche_mit_umriss_ohne_dreiecksfuge() {
+    let p = with_terrain(cubes(&[(0.0, 0.0, 0.0)]));
+    let prims = prims_of(&p, serde_json::json!({"view": "southeast"}));
+    assert!(terrain_fills(&prims) >= 1, "Geländefläche fehlt");
+    // Würfel auf dem Gelände: 9 Würfelkanten + 4 Geländekanten, die Diagonale der zwei Dreiecke fehlt.
+    let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "terrain": false})));
+    assert_eq!(l.len(), 9, "ohne Gelände nur der Würfel");
+    let with = lines(&prims);
+    assert!(with.len() <= 9 + 4 + 2 && with.len() >= 9 + 4 - 2, "Würfel + Geländerand, keine Diagonale: {}", with.len());
+    // Reines Gelände: genau vier Randkanten, eine getönte Fläche.
+    let mut q = with_terrain(cubes(&[(0.0, 0.0, 0.0)]));
+    q.walls.clear();
+    q.drawing_levels.clear();
+    let prims = prims_of(&q, serde_json::json!({"view": "southeast"}));
+    assert_eq!(lines(&prims).len(), 4, "{:?}", lines(&prims));
+    assert_eq!(terrain_fills(&prims), 1);
+}
+
+#[test]
+fn keller_unter_gelaende_verdeckt() {
+    // Würfel unter dem Gelände (Oberkante −0.5): kein Würfel-Strich, nur der Geländerand.
+    let p = with_terrain(cubes(&[(0.0, 0.0, -1.5)]));
+    let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast"})));
+    assert_eq!(l.len(), 4, "{l:?}");
+    // Gelände aus (Parameter) bzw. Klasse „02“ ausgeblendet: der Würfel erscheint.
+    assert_eq!(lines(&prims_of(&p, serde_json::json!({"view": "southeast", "terrain": false}))).len(), 9);
+    let a = args(serde_json::json!({"view": "southeast", "hasVis": true, "invisible": ["02"]}), &p);
+    let prims = axo_primitives(&p, &a, false).unwrap().unwrap().0;
+    assert_eq!(terrain_fills(&prims), 0);
+    assert_eq!(lines(&prims).len(), 9);
+}
+
+#[test]
+fn baugrube_gibt_das_haus_im_gelaende_frei() {
+    // Versenkter Würfel in einer Baugrube: er schaut aus der Grube heraus (mehr als der Geländerand).
+    let mut q = with_terrain(cubes(&[(0.0, 0.0, -1.5)]));
+    let v = |x: f64, y: f64| Vec2 { x, y };
+    let pit = Excavation { id: "bg".into(), outline: vec![v(-3.0, -3.0), v(4.0, -3.0), v(4.0, 4.0), v(-3.0, 4.0)], bottom: -1.5, ..Default::default() };
+    q.context.as_mut().unwrap().push(ContextObject::Excavation(pit));
+    let n = lines(&prims_of(&q, serde_json::json!({"view": "southeast"}))).len();
+    assert!(n > 4 + 3, "Würfel in der Baugrube sichtbar: {n}");
 }

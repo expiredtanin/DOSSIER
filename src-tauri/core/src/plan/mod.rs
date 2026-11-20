@@ -47,6 +47,7 @@ pub mod cameras;
 pub mod mesh_plan;
 pub mod situation;
 pub mod axo;
+mod axo_terrain;
 pub mod contrast;
 pub mod arc_fit;
 pub(crate) mod seams;

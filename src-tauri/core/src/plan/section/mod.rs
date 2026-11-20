@@ -36,7 +36,7 @@ pub use bands::*;
 use shapes::*;
 use voids::*;
 pub(crate) use meshes::*;
-pub(crate) use projection::{model_view_faces, OwnerRef};
+pub(crate) use projection::{model_view_faces, OwnerRef, ViewFaces};
 use projection::*;
 pub use primitives::*;
 pub use openings::*;

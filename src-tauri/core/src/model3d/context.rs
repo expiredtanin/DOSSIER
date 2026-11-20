@@ -11,7 +11,7 @@ fn indices_u32(v: &[f64]) -> Vec<u32> {
 }
 
 /// Codes ausgeblendeter Kategorien samt Kindern einer ausgeblendeten Elternebene.
-pub(super) fn hidden_category_codes(cats: &[crate::model::LayerCategory]) -> std::collections::HashSet<&str> {
+pub(crate) fn hidden_category_codes(cats: &[crate::model::LayerCategory]) -> std::collections::HashSet<&str> {
     fn walk<'a>(list: &'a [crate::model::LayerCategory], parent_hidden: bool, out: &mut std::collections::HashSet<&'a str>) {
         for c in list {
             let hidden = parent_hidden || !c.visible;
