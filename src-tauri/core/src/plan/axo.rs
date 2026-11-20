@@ -315,7 +315,9 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
                 (vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
             if let Some(clip) = terrain {
+                let n = vf.faces.len();
                 super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, low.get(), &mut vf, &mut refs);
+                mark_building(&mut vf.faces, n);
             }
             // Modell-Normale = Mᵀ · Normale (die Normale ging über M⁻ᵀ).
             let model_n = vf.faces.iter().map(|f| unit([0, 1, 2].map(|k| m[0][k] * f.normal[0] + m[1][k] * f.normal[1] + m[2][k] * f.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
@@ -342,10 +344,22 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
                 (vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
             if let Some(clip) = terrain {
+                let n = vf.faces.len();
                 super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, low.get(), &mut vf, &mut refs);
+                mark_building(&mut vf.faces, n);
             }
             let model_n: Vec<V3> = vf.faces.iter().map(|q| unit([0, 1, 2].map(|k| r[k] * q.normal[0] + u[k] * q.normal[1] + f[k] * q.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
             Ok(Some((perspective_pass(vf.faces, model_n, zref, tan_half, aspect), refs)))
+        }
+    }
+}
+
+/// [310] Mit Gelände: die ersten `n` Flächen (Haus) sind ein Körper, das Gelände ein zweiter — die Kantenrechnung
+/// ergänzt die Schnittlinie Haus ∩ Gelände (`hlr::intersection_edges`, mit Verdeckung wie die Sichtkanten).
+fn mark_building(faces: &mut [hlr::Face], n: usize) {
+    if faces.len() > n {
+        for f in &mut faces[..n] {
+            f.solid = super::axo_terrain::BUILDING_SOLID;
         }
     }
 }

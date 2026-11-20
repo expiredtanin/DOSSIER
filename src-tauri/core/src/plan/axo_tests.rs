@@ -576,3 +576,30 @@ fn sockel_unter_dem_tiefsten_bauteil() {
     // Bauteil bei −6: Unterkante −6.5 statt −1. Bild höher um ≈ 5.5 m · Höhenmassstab (Isometrie ≈ 0.82).
     assert!(h(&p) - h(&q) > 4.0, "{} vs {}", h(&p), h(&q));
 }
+
+/// [310] Sockelseiten: je gerader Randkante des Zuschnitts eine einzige senkrechte Fläche (keine Fugen zwischen Dreieckskanten).
+#[test]
+fn sockelseite_je_randkante_eine_flaeche() {
+    // Parzelle schief zum Raster: der Zuschnitt zerlegt die Seiten in viele Stücke.
+    let parcel = serde_json::json!([{"x": -10.0, "y": -8.0}, {"x": 12.0, "y": -10.0}, {"x": 14.0, "y": 10.0}, {"x": -9.0, "y": 12.0}]);
+    let p = parcel_project(grid_terrain((-30.0, 30.0), (-30.0, 30.0), 40, 40), parcel, false);
+    let a = args(serde_json::json!({"view": "southeast"}), &p);
+    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, Some(TerrainClip::Parcel), 100.0).unwrap().expect("Flächen");
+    let sides = prep.faces.iter().filter(|f| refs.get(f.owner as usize).is_some_and(|r| r.terrain_side)).count();
+    assert_eq!(sides, 4, "eine Fläche je Seite des Zuschnitts");
+}
+
+/// [310] Haus im Gelände: Durchdringungslinie Wand ∩ Gelände (die Wand reicht unter das Gelände, Höhe 0.1·x).
+#[test]
+fn durchdringungslinie_haus_gelaende() {
+    let t = grid_terrain((-30.0, 30.0), (-30.0, 30.0), 12, 12);
+    let mut p = parcel_project(t, serde_json::json!([{"x": -20.0, "y": -20.0}, {"x": 20.0, "y": -20.0}, {"x": 20.0, "y": 20.0}, {"x": -20.0, "y": 20.0}]), true);
+    p.drawing_levels[0].base_elevation = Some(-1.0);
+    let with = lines(&prims_of(&p, serde_json::json!({"view": "southeast"})));
+    let mut q = p.clone();
+    q.context = None;
+    let without = lines(&prims_of(&q, serde_json::json!({"view": "southeast"})));
+    // Über dem Gelände entsteht mindestens eine Linie, die es ohne Gelände nicht gibt (Fusslinie der Wände am Boden).
+    let new_lines = with.iter().filter(|l| !without.iter().any(|m| (m.0[0] - l.0[0]).abs() < 1e-3 && (m.0[1] - l.0[1]).abs() < 1e-3 && (m.1[0] - l.1[0]).abs() < 1e-3 && (m.1[1] - l.1[1]).abs() < 1e-3)).count();
+    assert!(new_lines >= 3, "Schnittlinie Haus/Gelände fehlt: {new_lines} neue Linien");
+}

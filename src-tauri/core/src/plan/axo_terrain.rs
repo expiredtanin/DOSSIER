@@ -362,6 +362,11 @@ fn resample(pos: &[f64], idx: &[f64], rect: Option<[f64; 4]>) -> Vec<(Vec<V3>, V
     out
 }
 
+/// [310] Körper-Nummer der Geländeflächen; alle übrigen Flächen des Bilds tragen `BUILDING_SOLID`. Die Kantenrechnung
+/// liefert dann nur Durchdringungslinien Haus ↔ Gelände (Wände, Körper, Stützen aus dem Boden), keine zwischen Bauteilen.
+pub(super) const TERRAIN_SOLID: u32 = 1;
+pub(super) const BUILDING_SOLID: u32 = 2;
+
 /// Modell (x, y, Höhe) → Welt (x, Höhe, y) (Umkehrung von `model_of`).
 fn to_world(m: V3) -> V3 {
     [m[0], m[2], m[1]]
@@ -457,6 +462,7 @@ pub(super) fn add_terrain(p: &Project, vis: &Visibility, view: &dyn Fn(V3) -> V3
         for (pts, rim, n) in &oriented {
             let mut f = hlr::Face::new(pts.iter().map(|&q| view(to_world(q))).collect(), view_n(to_world(*n)), owner);
             f.no_edge = rim.iter().map(|r| !r).collect();
+            f.solid = TERRAIN_SOLID;
             vf.faces.push(f);
         }
         if area.is_some() {
@@ -498,7 +504,48 @@ fn add_sockel(tris: &[(Vec<V3>, Vec<bool>, V3)], id: &str, lowest: f64, view: &d
     let owner = refs.len() as u32;
     refs.push(OwnerRef { kind: Kind::Mesh, id: Some(id.to_string()), stair: false, column: false, railing: false, glass: false, perforated: false, opening: false, terrain: true, terrain_side: true });
     vf.owners.push((Kind::Mesh, usize::MAX));
-    for (a, b) in rim {
+    // [310] Aufeinanderfolgende, in der Aufsicht gerade Randkanten (Zuschnittkante, in viele Stücke zerlegt) bilden EINE
+    // senkrechte Fläche: keine Fugen zwischen Nachbarflächen (Haarlinien beim Füllen), eine Tönung je Seite.
+    let eq = |a: V3, b: V3| (a[0] - b[0]).powi(2) + (a[1] - b[1]).powi(2) < 1e-8;
+    let mut starts: HashMap<(i64, i64), Vec<usize>> = HashMap::new();
+    for (i, (a, _)) in rim.iter().enumerate() {
+        starts.entry((q(a[0]), q(a[1]))).or_default().push(i);
+    }
+    let next_of = |i: usize| -> Option<usize> {
+        let b = rim[i].1;
+        let (cx, cy) = (q(b[0]), q(b[1]));
+        (-1..=1).flat_map(|di| (-1..=1).map(move |dj| (cx + di, cy + dj))).filter_map(|c| starts.get(&c)).flatten().copied().find(|&j| j != i && eq(rim[j].0, b))
+    };
+    let straight = |d1: [f64; 2], d2: [f64; 2]| -> bool {
+        let (l1, l2) = ((d1[0] * d1[0] + d1[1] * d1[1]).sqrt(), (d2[0] * d2[0] + d2[1] * d2[1]).sqrt());
+        l1 > 1e-9 && l2 > 1e-9 && d1[0] * d2[0] + d1[1] * d2[1] > 0.0 && (d1[0] * d2[1] - d1[1] * d2[0]).abs() < 2e-3 * l1 * l2
+    };
+    let dir = |i: usize| [rim[i].1[0] - rim[i].0[0], rim[i].1[1] - rim[i].0[1]];
+    let nexts: Vec<Option<usize>> = (0..rim.len()).map(next_of).collect();
+    let mut has_pred = vec![false; rim.len()];
+    for n in nexts.iter().flatten() {
+        has_pred[*n] = true;
+    }
+    let pred_straight: Vec<bool> = (0..rim.len()).map(|i| nexts.iter().enumerate().any(|(p, n)| *n == Some(i) && straight(dir(p), dir(i)))).collect();
+    let mut seen = vec![false; rim.len()];
+    let mut order: Vec<usize> = (0..rim.len()).filter(|&i| !has_pred[i] || !pred_straight[i]).collect();
+    order.extend(0..rim.len());
+    for i0 in order {
+        if seen[i0] {
+            continue;
+        }
+        let mut run = vec![i0];
+        seen[i0] = true;
+        let a0 = rim[i0].0;
+        while let Some(j) = nexts[*run.last().unwrap()] {
+            let b_cur = rim[*run.last().unwrap()].1;
+            if seen[j] || !straight([b_cur[0] - a0[0], b_cur[1] - a0[1]], dir(j)) {
+                break;
+            }
+            seen[j] = true;
+            run.push(j);
+        }
+        let (a, b) = (a0, rim[*run.last().unwrap()].1);
         let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
         let l = (dx * dx + dy * dy).sqrt();
         if !(l > 1e-9) {
@@ -510,9 +557,16 @@ fn add_sockel(tris: &[(Vec<V3>, Vec<bool>, V3)], id: &str, lowest: f64, view: &d
             let dl = (d[0] * d[0] + d[1] * d[1]).sqrt();
             dl > 1e-9 && ((d[0] * dy - d[1] * dx).abs() > 1e-3 * dl * l || d[0] * dx + d[1] * dy < 0.0)
         });
-        let (al, bl) = ([a[0], a[1], zb], [b[0], b[1], zb]);
-        let mut f = hlr::Face::new([a, al, bl, b].iter().map(|&q| view(to_world(q))).collect(), view_n(to_world(n)), owner);
-        f.no_edge = vec![!corner, false, true, true];
+        // Umlauf: obere Punkte a0 … an, dann unten bn, a0; die obere Polylinie liegt in einer senkrechten Ebene.
+        let mut pts: Vec<V3> = vec![a, [a[0], a[1], zb], [b[0], b[1], zb], b];
+        let mut flags = vec![!corner, false, true, true];
+        for &k in run.iter().rev().skip(1) {
+            let p = rim[k].1;
+            pts.push(p);
+            flags.push(true);
+        }
+        let mut f = hlr::Face::new(pts.iter().map(|&q| view(to_world(q))).collect(), view_n(to_world(n)), owner);
+        f.no_edge = flags;
         vf.faces.push(f);
     }
 }
