@@ -191,6 +191,11 @@ export interface MarqueeSelection {
   treeIds?: string[];
   /** [279] Getroffene Geländer (Pick-Flächen um die Achse, gleiche Konvention). */
   railingIds?: string[];
+  /** [317] Nur im Schnitt/in der Ansicht (`sheetBodies`): Stützen/Träger, Dächer, Öffnungen, Körper (gleiche Konvention). */
+  columnIds?: string[];
+  roofIds?: string[];
+  openingIds?: string[];
+  solidIds?: string[];
   /** [213] Getroffene Kameras (Pick-Flächen von Gehäuse und Sichtgrenzen, gleiche Konvention). */
   cameraIds?: string[];
   /**

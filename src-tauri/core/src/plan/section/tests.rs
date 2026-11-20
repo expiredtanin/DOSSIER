@@ -443,6 +443,22 @@ fn beispiel_schnitt_mit_pick_ids() {
     assert!(!serde_json::to_string(&hidden).unwrap().contains("\"roofId\""));
 }
 
+/// [317] Geschnittene Stütze trägt im Schnitt die Pick-Id `columnId` (vorher `ceilingId` mit der Stützen-Id: Klick
+/// wählte eine nicht vorhandene Decke, die Stütze blieb unwählbar).
+#[test]
+fn geschnittene_stuetze_traegt_column_id() {
+    let mut p = sample();
+    p.columns = Some(serde_json::from_value(serde_json::json!([
+        {"id": "C1", "type": "column", "floorId": "eg", "categoryCode": "25", "position": {"x": 20.0, "y": 1.0}, "profile": {"kind": "rect", "width": 0.4, "depth": 0.4}, "rotation": 0, "height": 2.5}
+    ])).unwrap());
+    let l = LevelSpec { kind: "section".into(), line: Some([Vec2 { x: 19.0, y: 1.0 }, Vec2 { x: 21.0, y: 1.0 }]), ..Default::default() };
+    let out = compute_section(&p, &l, &[]).unwrap().unwrap();
+    let (prims, _) = section_primitives(&out, false, false, &Visibility::default());
+    let col: Vec<_> = prims.iter().filter(|q| matches!(q, Primitive::Polygon { column_id: Some(c), .. } if c == "C1")).collect();
+    assert!(!col.is_empty(), "Stütze nicht als columnId im Schnitt");
+    assert!(col.iter().all(|q| matches!(q, Primitive::Polygon { ceiling_id: None, .. })));
+}
+
 /// [94] Sturz, Fensterbänke und Storenkasten im Sturz erscheinen im Schnitt nur, wenn gesetzt.
 #[test]
 fn sturz_baenke_und_storenkasten_im_schnitt() {

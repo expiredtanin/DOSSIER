@@ -1450,3 +1450,26 @@ fn materialfuge_an_der_geschossgrenze() {
     let len: f64 = s.iter().map(|(a, b)| (b.x - a.x).abs()).sum();
     assert!(len > 4.0, "Materialfuge fehlt: {s:?}");
 }
+
+/// [317] Treppen in der Ansicht tragen die Pick-Id der Treppe (`stairId`), nicht die einer Decke: sonst wählt der
+/// Klick eine nicht vorhandene Decke, und die Treppe bleibt unwählbar.
+#[test]
+fn treppe_in_der_ansicht_traegt_stair_id() {
+    let p = sample();
+    assert!(p.stairs.as_deref().is_some_and(|s| !s.is_empty()), "Beispielprojekt ohne Treppe");
+    let ceilings: HashSet<String> = p.ceilings.as_deref().unwrap_or(&[]).iter().map(|c| c.id.clone()).collect();
+    let mut stairs_seen = HashSet::new();
+    for l in p.drawing_levels.iter().filter(|l| l.id.starts_with("ansicht")) {
+        let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
+        let Some((prims, _)) = elevation_primitives(&p, &level, true, false, &Visibility::default(), 100.0).unwrap() else { continue };
+        for q in &prims {
+            if let Primitive::Polygon { ceiling_id: Some(c), .. } = q {
+                assert!(ceilings.contains(c), "{c} ist keine Decke ({})", l.id);
+            }
+            if let Primitive::Polygon { stair_id: Some(s), .. } = q {
+                stairs_seen.insert(s.clone());
+            }
+        }
+    }
+    assert!(!stairs_seen.is_empty(), "keine Treppe mit stairId in den Ansichten");
+}

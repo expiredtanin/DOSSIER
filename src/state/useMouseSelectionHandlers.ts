@@ -331,9 +331,9 @@ export function useMouseSelectionHandlers(opts: {
       ceilingIds: sel.ceilingIds ?? [],
       roomIds: sel.roomIds ?? [],
       stairIds: sel.stairIds ?? [],
-      columnIds: [],
-      roofIds: [],
-      openingIds: [],
+      columnIds: sel.columnIds ?? [],
+      roofIds: sel.roofIds ?? [],
+      openingIds: sel.openingIds ?? [],
       treeIds: sel.treeIds ?? [],
       cameraIds: sel.cameraIds ?? [],
       railingIds: sel.railingIds ?? [],
@@ -349,9 +349,9 @@ export function useMouseSelectionHandlers(opts: {
             ceilingIds: raw.ceilingIds.filter((id) => isInsideActiveGroup(project, "ceilingIds", id, groupPath)),
             roomIds: raw.roomIds.filter((id) => isInsideActiveGroup(project, "roomIds", id, groupPath)),
             stairIds: raw.stairIds.filter((id) => isInsideActiveGroup(project, "stairIds", id, groupPath)),
-            columnIds: [],
-            roofIds: [],
-            openingIds: [],
+            columnIds: raw.columnIds.filter((id) => isInsideActiveGroup(project, "columnIds", id, groupPath)),
+            roofIds: raw.roofIds.filter((id) => isInsideActiveGroup(project, "roofIds", id, groupPath)),
+            openingIds: raw.openingIds.filter((id) => isInsideActiveGroup(project, "openingIds", id, groupPath)),
             treeIds: raw.treeIds.filter((id) => isInsideActiveGroup(project, "treeIds", id, groupPath)),
             cameraIds: raw.cameraIds.filter((id) => isInsideActiveGroup(project, "cameraIds", id, groupPath)),
             railingIds: raw.railingIds.filter((id) => isInsideActiveGroup(project, "railingIds", id, groupPath)),
@@ -359,12 +359,14 @@ export function useMouseSelectionHandlers(opts: {
     // Gruppen-Erweiterung: jedes getroffene Element, das zu einer sichtbaren
     // Gruppe gehört, zieht deren ganze (transitive) Mitgliedschaft nach.
     const { expanded, groupIds } = expandToGroups(project, filtered, groupPath);
-    // Öffnungen/Extrusionen/Stützen/Dächer/Kontext-Objekte sind (noch) nicht
-    // Teil des Marquee (Nutzer-Report betraf nur Decken/Räume/Treppen; Stütze/
-    // Dach liessen sich mit derselben `marqueeHitByField`-Mechanik ergänzen,
-    // falls gewünscht) → beim Aufziehen abwählen.
+    // Stützen/Dächer/Öffnungen/Körper nur im Schnitt und in der Ansicht ([317], `sheetBodies`); im Grundriss
+    // (Dach deckt die ganze Traufe, Fenster hängen an ihrer Wand) bleiben sie ausserhalb des Rahmens.
     setSelection({
       ...clearKinds(),
+      columns: expanded.columnIds,
+      roofs: expanded.roofIds,
+      openings: expanded.openingIds,
+      solids: sel.solidIds ?? [],
       walls: expanded.wallIds,
       drawings: expanded.drawingIds,
       ceilings: expanded.ceilingIds,

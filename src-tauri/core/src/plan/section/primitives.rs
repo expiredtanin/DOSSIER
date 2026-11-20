@@ -552,17 +552,18 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
             _ if stroked && dash.is_none() => polygon(pts, &fill, SECTION_INK, SECTION_JOINT_MM, hatch),
             _ => polygon(pts, &fill, "none", 0.0, hatch),
         };
-        if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, extruded_solid_id, no_stroke_edges, greyed, context_object_id, .. } = &mut pr {
+        if let Primitive::Polygon { wall_id, ceiling_id, roof_id, stair_id, column_id, extruded_solid_id, no_stroke_edges, greyed, context_object_id, .. } = &mut pr {
             // [152] Importiertes Netz: Pick über die Kontext-Id.
             *context_object_id = if cp.kind == Kind::Mesh { src.clone() } else { None };
             *wall_id = if cp.kind == Kind::Wall { src.clone() } else { None };
-            *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() && cp.railing_id.is_none() { src.clone() } else { None };
+            *ceiling_id = if cp.kind == Kind::Slab && cp.stair_id.is_none() && cp.railing_id.is_none() && cp.column_id.is_none() { src.clone() } else { None };
             // [279] Geländer: Pick über die Kontext-Id `@railing:<id>`.
             if let Some(r) = &cp.railing_id {
                 *context_object_id = Some(crate::plan::railings::pick_id(r));
             }
             *roof_id = if cp.kind == Kind::Roof { src.clone() } else { None };
             *stair_id = cp.stair_id.clone();
+            *column_id = cp.column_id.clone();
             *extruded_solid_id = if cp.kind == Kind::Body { src } else { None };
             *no_stroke_edges = cp.nse.clone();
             *greyed = Some(cp.category.as_deref().is_some_and(|c| vis.greyed(c)));

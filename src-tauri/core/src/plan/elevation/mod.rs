@@ -526,6 +526,7 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
 
     let nb = crate::roof_assembly::neighbors_rc(p);
     let assembled: std::collections::HashSet<&str> = p.roofs.as_deref().unwrap_or(&[]).iter().enumerate().filter(|(i, _)| crate::roof_assembly::is_assembled_with(p, *i, &nb)).map(|(_, r)| r.id.as_str()).collect();
+    let stair_ids: std::collections::HashSet<&str> = p.stairs.as_deref().unwrap_or(&[]).iter().map(|s| s.id.as_str()).collect();
     let needed = mesh_faces_needed(&faces);
     // [G4] Füllungen aus der exakten Sichtbarkeit: je Fläche die sichtbaren Teile (wie die Kanten), damit keine
     // Füllung über einer verdeckten Kante liegt (Maler-Reihenfolge nach Mitteltiefe irrte bei Gauben, die vor der
@@ -557,11 +558,13 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
             if let (true, Primitive::Polygon { opacity, .. }) = (f.see_through, &mut prim) {
                 *opacity = Some(GLASS_OPACITY);
             }
-            if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, roof_id, column_id, context_object_id, extruded_solid_id, .. } = &mut prim {
+            if let Primitive::Polygon { greyed: g, wall_id, ceiling_id, stair_id, roof_id, column_id, context_object_id, extruded_solid_id, .. } = &mut prim {
                 *g = Some(greyed(f));
                 if !f.id.is_empty() {
                     match f.role {
                         Role::Wall => *wall_id = Some(f.id.clone()),
+                        // [317] Treppen laufen als Platten-Flächen durch die Ansicht; ihre Pick-Id ist die Treppe, nicht eine Decke.
+                        Role::Slab if stair_ids.contains(f.id.as_str()) => *stair_id = Some(f.id.clone()),
                         Role::Slab => *ceiling_id = Some(f.id.clone()),
                         Role::Roof => *roof_id = Some(f.id.clone()),
                         Role::Column => *column_id = Some(f.id.clone()),
