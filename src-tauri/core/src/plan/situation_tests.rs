@@ -299,3 +299,22 @@ fn planzeichen_weichen_linien_aus() {
     let moved = symbols_box(&placed_symbols(500.0, 40.0, -10.0, &o));
     assert!(moved[2] < x || moved[0] > x, "Zeichen links oder rechts der Linie: {moved:?} x={x}");
 }
+
+/// [322] Zwei lange senkrechte Linien (Parzellengrenzen, weit unter die Lage reichend): Balken samt „20 m“ und Nordpfeil
+/// stehen zwischen ihnen bzw. daneben, keines der Zeichen wird von einer Linie geschnitten.
+#[test]
+fn planzeichen_zwischen_langen_linien() {
+    let (right, below) = (40.0, -10.0);
+    let mut o = crate::plan::stamp_place::Obstacles::default();
+    let (lx1, lx2) = (right - 70.0, right + 0.5);
+    o.seg([lx1, -300.0], [lx1, 0.0]);
+    o.seg([lx2, -300.0], [lx2, 0.0]);
+    let ps = placed_symbols(500.0, right, below, &o);
+    assert!(!ps.is_empty());
+    for q in &ps {
+        let b = symbols_box(std::slice::from_ref(q));
+        for lx in [lx1, lx2] {
+            assert!(!(b[0] < lx && lx < b[2]), "Zeichen von Linie x={lx} geschnitten: {b:?}");
+        }
+    }
+}

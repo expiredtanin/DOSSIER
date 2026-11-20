@@ -434,27 +434,42 @@ fn symbols_box(ps: &[Primitive]) -> [f64; 4] {
     b.get().unwrap_or([0.0; 4])
 }
 
-/// [321] Zeichen an der ersten Lage ohne Überdeckung mit `obst`: Abstand unter der Lage 0 … 18 mm zusätzlich, je
-/// Stufe 0 … 80 mm nach links (Papier). Ist keine frei, gilt die mit der geringsten Überdeckung (bei Gleichstand die nächste).
+/// Zeichen unter der Lage; Massstabsbalken (samt Beschriftung) und Nordpfeil suchen ihre Lage getrennt ([322]), damit
+/// sie zwischen zwei langen Linien (Parzellengrenzen) Platz finden.
+/// [321] Erste Lage ohne Überdeckung mit `obst`: Abstand unter der Lage 0 … 18 mm zusätzlich, je Stufe 0 … 100 mm nach
+/// links (Papier). Ist keine frei, gilt die mit der geringsten Überdeckung (bei Gleichstand die nächste).
 fn placed_symbols(scale: f64, right: f64, below: f64, obst: &super::stamp_place::Obstacles) -> Vec<Primitive> {
     let mm = |v: f64| mm_to_model(v, scale);
-    let mut best: Option<(f64, Vec<Primitive>)> = None;
-    for dy in 0..=6 {
-        for dx in 0..=20 {
-            let ps = symbols(scale, right - mm(4.0 * dx as f64), below - mm(3.0 * dy as f64));
-            let b = symbols_box(&ps);
-            let pad = mm(0.5);
-            let (hw, hh) = ((b[2] - b[0]) / 2.0 + pad, (b[3] - b[1]) / 2.0 + pad);
-            let ov = obst.overlap(Vec2 { x: (b[0] + b[2]) / 2.0, y: (b[1] + b[3]) / 2.0 }, hw, hh);
-            if ov == 0.0 {
-                return ps;
-            }
-            if best.as_ref().is_none_or(|(o, _)| ov < *o) {
-                best = Some((ov, ps));
+    let search = |make: &dyn Fn(f64, f64) -> Vec<Primitive>, obst: &super::stamp_place::Obstacles, steps: i32| -> (Vec<Primitive>, [f64; 4]) {
+        let mut best: Option<(f64, Vec<Primitive>)> = None;
+        for dy in 0..=6 {
+            for dx in 0..=steps {
+                let ps = make(-mm(4.0 * dx as f64), -mm(3.0 * dy as f64));
+                let b = symbols_box(&ps);
+                let pad = mm(0.5);
+                let (hw, hh) = ((b[2] - b[0]) / 2.0 + pad, (b[3] - b[1]) / 2.0 + pad);
+                let ov = obst.overlap(Vec2 { x: (b[0] + b[2]) / 2.0, y: (b[1] + b[3]) / 2.0 }, hw, hh);
+                if ov == 0.0 {
+                    return (ps, b);
+                }
+                if best.as_ref().is_none_or(|(o, _)| ov < *o) {
+                    best = Some((ov, ps));
+                }
             }
         }
-    }
-    best.map(|b| b.1).unwrap_or_default()
+        let ps = best.map(|b| b.1).unwrap_or_default();
+        let b = symbols_box(&ps);
+        (ps, b)
+    };
+    let (mut out, bar) = search(&|ox, oy| scalebar(scale, right + ox, below + oy), obst, 30);
+    // Der Nordpfeil steht links vom Balken (Mitte x0 − 14 mm) und meidet auch ihn.
+    let mut o = obst.clone();
+    let pad = mm(1.0);
+    o.area(vec![[bar[0] - pad, bar[1] - pad], [bar[2] + pad, bar[1] - pad], [bar[2] + pad, bar[3] + pad], [bar[0] - pad, bar[3] + pad]]);
+    let x0 = bar[0] + mm(0.6);
+    let (arrow, _) = search(&|ox, oy| north_arrow(scale, x0 + ox, below + oy), &o, 30);
+    out.extend(arrow);
+    out
 }
 
 /// Länge des Massstabsbalkens (m): die grösste runde Länge, die auf dem Papier höchstens 50 mm misst.
@@ -466,9 +481,15 @@ pub fn scalebar_total(scale: f64) -> f64 {
 /// Nordpfeil und Massstabsbalken; `right`/`below` = rechter Rand und Oberkante der Lage (Modell-Meter), die
 /// Zeichen stehen darunter (Papierabstand 12 mm). Norden = +y.
 pub fn symbols(scale: f64, right: f64, below: f64) -> Vec<Primitive> {
+    let mut out = scalebar(scale, right, below);
+    out.extend(north_arrow(scale, right - scalebar_total(scale), below));
+    out
+}
+
+/// Massstabsbalken: vier Felder, abwechselnd gefüllt; Beschriftung 0 / halbe Länge / Länge.
+fn scalebar(scale: f64, right: f64, below: f64) -> Vec<Primitive> {
     let mm = |v: f64| mm_to_model(v, scale);
     let mut out = Vec::new();
-    // Massstabsbalken: vier Felder, abwechselnd gefüllt; Beschriftung 0 / halbe Länge / Länge.
     let total = scalebar_total(scale);
     let len = total;
     let (y1, h) = (below - mm(12.0), mm(1.6));
@@ -483,7 +504,14 @@ pub fn symbols(scale: f64, right: f64, below: f64) -> Vec<Primitive> {
     out.push(text(Vec2 { x: x0 - mm(0.6), y: y1 - h - th * 1.4 }, "0", th));
     out.push(text(Vec2 { x: x0 + len / 2.0 - mm(1.0), y: y1 - h - th * 1.4 }, &label(total / 2.0), th));
     out.push(text(Vec2 { x: right - mm(1.0) * (label(total).len() as f64 + 2.0), y: y1 - h - th * 1.4 }, &format!("{} m", label(total)), th));
-    // Nordpfeil links vom Balken: halb gefüllte Spitze, „N" darüber.
+    out
+}
+
+/// Nordpfeil links vom Balken (`x0` = linkes Ende des Balkens): halb gefüllte Spitze, „N" darüber.
+fn north_arrow(scale: f64, x0: f64, below: f64) -> Vec<Primitive> {
+    let mm = |v: f64| mm_to_model(v, scale);
+    let mut out = Vec::new();
+    let (y1, h) = (below - mm(12.0), mm(1.6));
     let (cx, cy, r) = (x0 - mm(14.0), y1 - h / 2.0 - mm(3.0), mm(6.0));
     let top = Vec2 { x: cx, y: cy + r };
     let mid = Vec2 { x: cx, y: cy - r * 0.35 };

@@ -2343,6 +2343,12 @@ pub fn grid_bubble_prims(c: &Ctx) -> Vec<Primitive> {
     prims_where(c, |g| matches!(g, Drawing2DGeom::Grid { .. })).into_iter().filter(|q| matches!(q, Primitive::DrawingCircle { .. } | Primitive::DrawingText { .. })).collect()
 }
 
+/// [322] Primitive der übrigen Zeichnungen des Geschosses (Linien, Polylinien, Flächen …, z. B. Parzellen- und
+/// Nachbargrenzen): die Planzeichen der Situation weichen ihnen aus.
+pub fn line_obstacle_prims(c: &Ctx) -> Vec<Primitive> {
+    prims_where(c, |g| !is_stamp_obstacle(g))
+}
+
 fn prims_where(c: &Ctx, pred: impl Fn(&Drawing2DGeom) -> bool) -> Vec<Primitive> {
     let mut out = Out::default();
     let mut memo = Memo::default();

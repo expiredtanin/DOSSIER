@@ -2229,7 +2229,7 @@ fn domains_after(c: &Ctx, out: &mut DomainPrims, bounds: &mut Bounds, marks: &mu
     if let Some(s) = &sit {
         if c.a.global {
             let mut o = obstacles_with(out, drawing_obstacles(c), true);
-            for q in &out.roofs {
+            for q in out.roofs.iter().chain(&out.context).chain(&super::drawings::line_obstacle_prims(c)) {
                 if matches!(q, Primitive::Polygon { .. } | Primitive::Line { .. }) {
                     o.add_prim(q);
                 }
