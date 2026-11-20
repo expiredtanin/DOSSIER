@@ -4197,6 +4197,31 @@ mod tests {
         }
     }
 
+    /// [318] Zwei gleiche Treppen übereinander (Wettbewerb): die Untersicht der oberen fällt Linie für Linie auf die
+    /// gestrichelten Linien der eigenen — keine Linie zweimal.
+    #[test]
+    fn untersicht_deckungsgleiche_treppe_keine_doppelten_linien() {
+        let mut p = sample();
+        let hole = vec![Vec2 { x: -20.0, y: -20.0 }, Vec2 { x: 20.0, y: -20.0 }, Vec2 { x: 20.0, y: 20.0 }, Vec2 { x: -20.0, y: 20.0 }];
+        p.ceilings.as_mut().unwrap()[0].openings = Some(vec![hole]);
+        let mut s = p.stairs.as_ref().unwrap()[0].clone();
+        s.id = "OBEN".into();
+        s.floor_id = "og".into();
+        p.stairs.as_mut().unwrap().truncate(1);
+        p.stairs.as_mut().unwrap().push(s);
+        let t = serde_json::json!({ "floor": "eg", "show": ["30", "40"], "grey": [], "scale": 50 }).to_string();
+        let st = plan_domains(&p, &PlanArgs::parse(1.0, &t).unwrap()).unwrap().stairs;
+        let r = |v: f64| (v * 1e5).round() as i64;
+        let mut seen = std::collections::HashSet::new();
+        for q in &st {
+            if let Primitive::Line { a, b, cls, .. } = q {
+                let (pa, pb) = ((r(a.x), r(a.y)), (r(b.x), r(b.y)));
+                assert!(seen.insert((pa.min(pb), pa.max(pb), cls.to_string())), "doppelte Linie {cls} {a:?} {b:?}");
+            }
+        }
+        assert!(!seen.is_empty());
+    }
+
     /// [150] Nur der Stempel mit Anker ausserhalb seines Raums wird Hindernis der Höhenlinien-Beschriftungen.
     #[test]
     fn stempel_ausserhalb_des_raums_ist_hindernis() {

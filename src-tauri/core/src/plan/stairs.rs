@@ -339,6 +339,19 @@ fn underside(c: &Ctx, out: &mut Vec<Primitive>, double: bool, opts: &super::mode
             k += 1;
             k <= start || !matches!(q, Primitive::Line { cls, .. } if cls == "stair-arrow" || cls == "stair-break") && !matches!(q, Primitive::Polygon { fill, .. } if fill != "none")
         });
+        // [318] Liegt die Treppe darüber genau auf der eigenen (Wettbewerb: zwei gleiche Treppen übereinander), fielen ihre
+        // gestrichelten Linien auf die schon gezeichneten: doppelte Linien (Plotter, DXF) — die zweite entfällt.
+        let key = |a: &Vec2, b: &Vec2, cls: &str| {
+            let r = |v: f64| (v * 1e5).round() as i64;
+            let (p, q) = ((r(a.x), r(a.y)), (r(b.x), r(b.y)));
+            (p.min(q), p.max(q), cls.to_string())
+        };
+        let before: std::collections::HashSet<_> = out[..start.min(out.len())].iter().filter_map(|q| match q { Primitive::Line { a, b, cls, .. } => Some(key(a, b, cls)), _ => None }).collect();
+        let mut k = 0;
+        out.retain(|q| {
+            k += 1;
+            k <= start || !matches!(q, Primitive::Line { a, b, cls, .. } if before.contains(&key(a, b, cls)))
+        });
     }
 }
 

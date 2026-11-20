@@ -156,6 +156,7 @@ pub(super) fn clip_context_meshes_to_terrain(out: &mut Output) {
         .into_iter()
         .flat_map(|(k, pts)| if ctx.get(k).copied().unwrap_or(false) { clip_line_to_u(&pts, lo, hi) } else { vec![pts] }.into_iter().map(move |p| (k, p)))
         .collect();
+    let tops = ground_tops(&out.profiles);
     let clip_edges = |v: Vec<Edge>| -> Vec<Edge> {
         v.into_iter()
             .filter_map(|mut e| {
@@ -170,6 +171,13 @@ pub(super) fn clip_context_meshes_to_terrain(out: &mut Output) {
                 e.a = if a[0] < lo { at(lo) } else { a };
                 e.b = if b[0] > hi { at(hi) } else { b };
                 Some(e)
+            })
+            // [318] Nachbarkanten unter der Geländelinie entfallen (sie zeichneten durch die Erdreich-Schraffur).
+            .flat_map(|e| {
+                if !is_ctx(e.kind, e.index) || tops.is_empty() {
+                    return vec![e];
+                }
+                segment_above_ground(e.a, e.b, &tops).into_iter().map(|(a, b)| Edge { a, b, ..e }).collect()
             })
             .collect()
     };
@@ -203,6 +211,89 @@ fn below_ground_polys(profiles: &[Profile], lo: f64, hi: f64) -> Vec<crate::flat
             Some(vec![ring])
         })
         .collect()
+}
+
+/// [318] Oberkante (höchste Höhe je u, von links nach rechts) jeder gestalteten Geländelinie.
+fn ground_tops(profiles: &[Profile]) -> Vec<Vec<[f64; 2]>> {
+    profiles
+        .iter()
+        .filter(|p| !p.natural && p.pts.len() >= 2)
+        .map(|p| {
+            let mut top: Vec<[f64; 2]> = Vec::new();
+            let mut pts = p.pts.clone();
+            pts.sort_by(|a, b| a[0].total_cmp(&b[0]));
+            for q in pts {
+                match top.last_mut() {
+                    Some(l) if (l[0] - q[0]).abs() < 1e-9 => l[1] = l[1].max(q[1]),
+                    _ => top.push(q),
+                }
+            }
+            top
+        })
+        .filter(|t| t.len() >= 2)
+        .collect()
+}
+
+/// [318] Teil der Strecke a–b über der Geländelinie `top` (ausserhalb ihres u-Bereichs unverändert): die Strecke wird an den
+/// Knicken der Linie und am Schnittpunkt geteilt, behalten wird, was nicht unter dem Gelände liegt.
+fn segment_above_ground(a: [f64; 2], b: [f64; 2], top: &[Vec<[f64; 2]>]) -> Vec<([f64; 2], [f64; 2])> {
+    let mut segs = vec![(a, b)];
+    for t in top {
+        let g = |u: f64| -> Option<f64> {
+            if u < t[0][0] - 1e-9 || u > t[t.len() - 1][0] + 1e-9 {
+                return None;
+            }
+            let i = t.windows(2).position(|w| u <= w[1][0] + 1e-12).unwrap_or(t.len() - 2);
+            let (p, q) = (t[i], t[i + 1]);
+            Some(if q[0] - p[0] < 1e-12 { p[1].max(q[1]) } else { p[1] + (q[1] - p[1]) * ((u - p[0]) / (q[0] - p[0])).clamp(0.0, 1.0) })
+        };
+        let mut next = Vec::new();
+        for (s, e) in segs {
+            if (e[0] - s[0]).abs() < 1e-12 {
+                // senkrecht: nur Höhen ≥ Gelände
+                match g(s[0]) {
+                    Some(gz) => {
+                        let (lo, hi) = (s[1].min(e[1]).max(gz), s[1].max(e[1]));
+                        if hi - lo > 1e-9 {
+                            next.push(([s[0], lo], [s[0], hi]));
+                        }
+                    }
+                    None => next.push((s, e)),
+                }
+                continue;
+            }
+            let (s, e) = if s[0] <= e[0] { (s, e) } else { (e, s) };
+            // Teilpunkte: Anfang, Knicke der Geländelinie dazwischen, Ende
+            let mut us = vec![s[0]];
+            us.extend(t.iter().map(|q| q[0]).filter(|&u| u > s[0] + 1e-9 && u < e[0] - 1e-9));
+            us.push(e[0]);
+            let z_at = |u: f64| s[1] + (e[1] - s[1]) * (u - s[0]) / (e[0] - s[0]);
+            let mut pieces: Vec<([f64; 2], [f64; 2])> = Vec::new();
+            for w in us.windows(2) {
+                let (u0, u1) = (w[0], w[1]);
+                let (p0, p1) = ([u0, z_at(u0)], [u1, z_at(u1)]);
+                let mid = 0.5 * (u0 + u1);
+                if g(mid).is_none() {
+                    pieces.push((p0, p1));
+                    continue;
+                }
+                let g0 = g(u0 + (u1 - u0) * 1e-9).unwrap_or(f64::NEG_INFINITY);
+                let g1 = g(u1 - (u1 - u0) * 1e-9).unwrap_or(f64::NEG_INFINITY);
+                let (d0, d1) = (p0[1] - g0, p1[1] - g1);
+                if d0 >= -1e-9 && d1 >= -1e-9 {
+                    pieces.push((p0, p1));
+                } else if d0 < -1e-9 && d1 < -1e-9 {
+                } else {
+                    let f = d0 / (d0 - d1);
+                    let x = [u0 + (u1 - u0) * f, z_at(u0 + (u1 - u0) * f)];
+                    pieces.push(if d0 >= 0.0 { (p0, x) } else { (x, p1) });
+                }
+            }
+            next.extend(pieces);
+        }
+        segs = next;
+    }
+    segs
 }
 
 fn ring_last_u(r: &[[f64; 2]]) -> f64 {

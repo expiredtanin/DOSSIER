@@ -200,7 +200,7 @@ function cadastre(): Drawing2D[] {
   label("kat-nr", P(8, -4), "Kat.-Nr. 1187  (880 m²)");
   label("kat-nr-w", P(-26, 6), "Kat.-Nr. 1186");
   label("kat-nr-o", P(36, 6), "Kat.-Nr. 1188");
-  label("str-name", P(20, 23.2), "Hofwiesenstrasse", 0.8);
+  label("str-name", P(20, 23.55), "Hofwiesenstrasse", 0.8);
   [P(-2, -3), P(25, -3), P(26, 16)].forEach((c, i) => add(`baum-${i + 1}`, { shape: "circle", center: c, r: 1.8 + (i % 2) * 0.5 }, { categoryCode: "13", lineStyleId: "std-ls-voll", weightMm: 0.13 }));
   return d;
 }

@@ -237,3 +237,19 @@ fn nachbar_schnittflaeche_endet_am_gelaende() {
     assert!(b[2] > -1e-9 && (b[3] - 6.0).abs() < 1e-9, "unten am Gelände (z = 0), oben unverändert: {b:?}");
     assert!((ring_area(&cuts[0].pts).abs() - 2.0 * 6.0).abs() < 1e-9);
 }
+
+/// [318] Ansichtskanten eines Nachbarn hinter der Ebene enden ebenfalls am Gelände: der Umriss zeichnete sonst durch die
+/// Erdreich-Schraffur (Komplex, Schnitt A-A).
+#[test]
+fn nachbar_kanten_enden_am_gelaende() {
+    let (positions, indices) = cube(-4.0, 7.0, -3.0, 3.0, -1.0, 0.0);
+    let terrain = ContextObject::TerrainMesh(TerrainMesh { id: "g".into(), name: "Site".into(), category_code: "02".into(), positions, indices, ..Default::default() });
+    let (np, ni) = cube(0.0, 2.0, 1.0, 2.5, -0.6, 6.0);
+    let nb = ContextObject::ImportedMesh(ImportedMesh { id: "keller".into(), name: "keller".into(), category_code: "12".into(), positions: np, indices: ni, ..Default::default() });
+    let p = with(vec![terrain, nb]);
+    let o = compute_section(&p, &lv(true), &[]).unwrap().unwrap();
+    let es: Vec<_> = o.visible.iter().chain(&o.hidden).filter(|e| e.kind == Kind::Mesh).collect();
+    assert!(!es.is_empty(), "Nachbarkanten vorhanden");
+    assert!(es.iter().all(|e| e.a[1] > -1e-9 && e.b[1] > -1e-9), "keine Kante unter dem Gelände: {es:?}");
+    assert!(es.iter().any(|e| (e.a[1] - 6.0).abs() < 1e-9 || (e.b[1] - 6.0).abs() < 1e-9), "Oberkante bleibt");
+}
