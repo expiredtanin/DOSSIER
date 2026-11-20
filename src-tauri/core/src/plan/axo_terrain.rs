@@ -16,6 +16,60 @@ const TRI_BUDGET: usize = 12_000;
 /// Zellen des Rasters, auf das zu dichte Netze umgerechnet werden (je zwei Dreiecke).
 const GRID_CELLS: f64 = 3_000.0;
 
+/// [308] Zuschnitt des Geländes im 3D-Dokument (Modellsockel).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum TerrainClip {
+    /// Parzelle (`siteRules.parcel`) + 2 m Rand, ohne Parzelle Gebäude + 5 m; mit Sockel-Seitenflächen.
+    #[default]
+    Parcel,
+    /// Immer Gebäude + 5 m; mit Sockel.
+    Building,
+    /// Wie vor [308]: weiter Ausschnitt um das Gebäude, kein Sockel.
+    None,
+}
+
+impl TerrainClip {
+    pub fn parse(s: &str) -> Option<TerrainClip> {
+        match s {
+            "" | "parcel" => Some(TerrainClip::Parcel),
+            "building" => Some(TerrainClip::Building),
+            "none" => Some(TerrainClip::None),
+            _ => None,
+        }
+    }
+}
+
+/// Rand um die Parzelle bzw. das Gebäude (m).
+const PARCEL_MARGIN: f64 = 2.0;
+const BUILDING_MARGIN: f64 = 5.0;
+/// Sockel reicht so weit unter den tiefsten Geländepunkt (m).
+const SOCKEL_DEPTH: f64 = 1.0;
+
+/// Ausschnitt [x0, y0, x1, y1] für das Gelände (`None`: keiner).
+fn clip_rect_of(p: &Project, bounds: Option<[f64; 4]>, clip: TerrainClip) -> Option<[f64; 4]> {
+    let grow = |b: [f64; 4], m: f64| [b[0] - m, b[1] - m, b[2] + m, b[3] + m];
+    if clip == TerrainClip::None {
+        return bounds.map(|b| {
+            let margin = (0.6 * (b[2] - b[0]).max(b[3] - b[1])).max(8.0);
+            grow(b, margin)
+        });
+    }
+    let parcel = (clip == TerrainClip::Parcel)
+        .then(|| p.site_rules.as_ref().map(|r| &r.parcel))
+        .flatten()
+        .filter(|r| r.len() >= 3 && r.iter().all(|q| q.x.is_finite() && q.y.is_finite()));
+    match (parcel, bounds) {
+        (Some(r), b) => {
+            let mut a = r.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |a, q| [a[0].min(q.x), a[1].min(q.y), a[2].max(q.x), a[3].max(q.y)]);
+            if let Some(b) = b {
+                a = [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])];
+            }
+            Some(grow(a, PARCEL_MARGIN))
+        }
+        (None, b) => b.map(|b| grow(b, BUILDING_MARGIN)),
+    }
+}
+
 /// Grundrissausdehnung des Gebäudes (Wände, Decken); `None` ohne Bauteile.
 fn building_bounds(p: &Project) -> Option<[f64; 4]> {
     let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
@@ -142,7 +196,7 @@ fn to_world(m: V3) -> V3 {
 }
 
 /// Gelände-Flächen an `vf` / `refs` anhängen. `view`/`view_n`: wie bei `model_view_faces` (Welt: x, Höhe, y).
-pub(super) fn add_terrain(p: &Project, vis: &Visibility, view: &dyn Fn(V3) -> V3, view_n: &dyn Fn(V3) -> V3, vf: &mut ViewFaces, refs: &mut Vec<OwnerRef>) {
+pub(super) fn add_terrain(p: &Project, vis: &Visibility, view: &dyn Fn(V3) -> V3, view_n: &dyn Fn(V3) -> V3, clip: TerrainClip, vf: &mut ViewFaces, refs: &mut Vec<OwnerRef>) {
     let hidden = crate::model3d::hidden_category_codes(&p.layers);
     let bounds = building_bounds(p);
     for t in crate::excavation::terrains(p) {
@@ -166,8 +220,7 @@ pub(super) fn add_terrain(p: &Project, vis: &Visibility, view: &dyn Fn(V3) -> V3
             }
         }
         // Ausschnitt: Umfang des Gebäudes + Rand.
-        let margin = bounds.map_or(f64::INFINITY, |b| (0.6 * (b[2] - b[0]).max(b[3] - b[1])).max(8.0));
-        let rect = bounds.map(|b| [b[0] - margin, b[1] - margin, b[2] + margin, b[3] + margin]);
+        let rect = clip_rect_of(p, bounds, clip);
         let mut clipped: Vec<(Vec<V3>, Vec<bool>)> = Vec::new();
         for t in &tris {
             let rim = [0, 1, 2].map(|k| count.get(&ekey(t[k], t[(k + 1) % 3])).copied().unwrap_or(0) < 2);
@@ -192,8 +245,9 @@ pub(super) fn add_terrain(p: &Project, vis: &Visibility, view: &dyn Fn(V3) -> V3
             continue;
         }
         let owner = refs.len() as u32;
-        refs.push(OwnerRef { kind: Kind::Mesh, id: Some(t.id.clone()), stair: false, column: false, railing: false, glass: false, perforated: false, opening: false, terrain: true });
+        refs.push(OwnerRef { kind: Kind::Mesh, id: Some(t.id.clone()), stair: false, column: false, railing: false, glass: false, perforated: false, opening: false, terrain: true, terrain_side: false });
         vf.owners.push((Kind::Mesh, usize::MAX));
+        let mut oriented: Vec<(Vec<V3>, Vec<bool>, V3)> = Vec::new();
         for (pts, rim) in clipped {
             let (a, b, c) = (pts[0], pts[1], pts[2]);
             let (u, w) = ([b[0] - a[0], b[1] - a[1], b[2] - a[2]], [c[0] - a[0], c[1] - a[1], c[2] - a[2]]);
@@ -212,9 +266,58 @@ pub(super) fn add_terrain(p: &Project, vis: &Visibility, view: &dyn Fn(V3) -> V3
                 rim = (0..m).map(|i| rim[(2 * m - 2 - i) % m]).collect();
             }
             let n = [n[0] / l, n[1] / l, n[2] / l];
-            let mut f = hlr::Face::new(pts.iter().map(|&q| view(to_world(q))).collect(), view_n(to_world(n)), owner);
+            oriented.push((pts, rim, n));
+        }
+        for (pts, rim, n) in &oriented {
+            let mut f = hlr::Face::new(pts.iter().map(|&q| view(to_world(q))).collect(), view_n(to_world(*n)), owner);
             f.no_edge = rim.iter().map(|r| !r).collect();
             vf.faces.push(f);
         }
+        if clip != TerrainClip::None {
+            add_sockel(&oriented, t.id.as_str(), view, view_n, vf, refs);
+        }
+    }
+}
+
+/// [308] Sockel: senkrechte Seitenflächen unter allen Randkanten bis `tiefster Punkt − 1 m` (Schnittkante des Modells).
+/// Senkrechte Kanten nur an Ecken des Umrisses, die obere Kante zeichnet die Geländefläche selbst.
+fn add_sockel(tris: &[(Vec<V3>, Vec<bool>, V3)], id: &str, view: &dyn Fn(V3) -> V3, view_n: &dyn Fn(V3) -> V3, vf: &mut ViewFaces, refs: &mut Vec<OwnerRef>) {
+    let zmin = tris.iter().flat_map(|t| t.0.iter().map(|q| q[2])).fold(f64::INFINITY, f64::min);
+    if !zmin.is_finite() {
+        return;
+    }
+    let zb = zmin - SOCKEL_DEPTH;
+    // Randkanten (Umlaufsinn: Fläche links) und Richtung der einlaufenden Kante je Punkt.
+    let mut rim: Vec<(V3, V3)> = Vec::new();
+    for (pts, flags, _) in tris {
+        let m = pts.len();
+        for i in 0..m {
+            if flags[i] {
+                rim.push((pts[i], pts[(i + 1) % m]));
+            }
+        }
+    }
+    let mut incoming: HashMap<K3, [f64; 2]> = HashMap::new();
+    for (a, b) in &rim {
+        incoming.insert(key(*b), [b[0] - a[0], b[1] - a[1]]);
+    }
+    let owner = refs.len() as u32;
+    refs.push(OwnerRef { kind: Kind::Mesh, id: Some(id.to_string()), stair: false, column: false, railing: false, glass: false, perforated: false, opening: false, terrain: true, terrain_side: true });
+    vf.owners.push((Kind::Mesh, usize::MAX));
+    for (a, b) in rim {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l = (dx * dx + dy * dy).sqrt();
+        if !(l > 1e-9) {
+            continue;
+        }
+        let n = [dy / l, -dx / l, 0.0];
+        let corner = incoming.get(&key(a)).is_none_or(|d| {
+            let dl = (d[0] * d[0] + d[1] * d[1]).sqrt();
+            dl > 1e-9 && (d[0] * dy - d[1] * dx).abs() > 1e-6 * dl * l
+        });
+        let (al, bl) = ([a[0], a[1], zb], [b[0], b[1], zb]);
+        let mut f = hlr::Face::new([a, al, bl, b].iter().map(|&q| view(to_world(q))).collect(), view_n(to_world(n)), owner);
+        f.no_edge = vec![!corner, false, true, true];
+        vf.faces.push(f);
     }
 }

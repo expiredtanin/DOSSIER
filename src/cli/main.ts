@@ -31,7 +31,7 @@
 //                                                  --hide <Code|Name,…> blendet Klassen aus (z. B. --hide "Schatten,Auto-Bemassung") [180]
 //                                                  --snapshot <Name|id> übernimmt Geschoss, Massstab, Vorlage und Sichtbarkeit eines Ausschnitts [207]
 //   dossier-cli <projekt.obp> axo [--view southeast|southwest|northeast|northwest|iso|…] [--projection iso|military|military30]
-//                                                  [--camera Name|id] [--snapshot Name|id] [--hidden] [--no-fills] [--context] [--hide …]
+//                                                  [--camera Name|id] [--snapshot Name|id] [--hidden] [--no-fills] [--context] [--terrain-clip parcel|building|none] [--hide …]
 //                                                  [--scale 200] [--hatch] [--color] [--format svg|json|dxf|dxfbin|dwg] [--out axo.svg]
 //                                                  [266] 3D-Dokument: Vektor-Axonometrie/-Perspektive mit verdeckten Kanten aus dem Kern
 //                                                  (Linienzeichnung, Silhouette kräftig, Flächen nach Lage grau; ohne GPU)
@@ -1293,6 +1293,11 @@ async function execute(project: Project, file: string, command: string, rest: st
       if (on("hidden")) opts.hiddenLines = true;
       if (f.has("no-fills") || f.get("fills") === "false") opts.fills = false;
       if (on("context")) opts.context = true;
+      const tc = f.get("terrain-clip");
+      if (tc) {
+        if (tc !== "parcel" && tc !== "building" && tc !== "none") fail("--terrain-clip: parcel | building | none");
+        opts.terrainClip = tc;
+      }
       const mono = f.has("color") ? inkArg(args) : true;
       const t0 = Date.now();
       const plan = generateAxoPlan(project, { ...opts, ...(renovationFlags(project, args) ?? {}), visibleCodes: codes, scaleDenominator: axScale, mono });

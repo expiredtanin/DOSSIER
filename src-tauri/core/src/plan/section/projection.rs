@@ -336,6 +336,8 @@ pub(crate) struct OwnerRef {
     pub opening: bool,
     /// [307] Gelände (Netz mit Baugruben, nur im 3D-Dokument): helle Tönung, Kanten nur am Rand.
     pub terrain: bool,
+    /// [308] Seitenfläche des Geländesockels (dunkler getönt).
+    pub terrain_side: bool,
 }
 
 /// [305] Besitzer-Nummern der Öffnungsteile in `ViewFaces::owners` (Index `usize::MAX` bzw. `- 1` der Art `Wall`).
@@ -376,7 +378,7 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
         .iter()
         .map(|&(kind, i)| {
             if kind == Kind::Wall && (i == OPENING_FRAME || i == OPENING_GLASS) {
-                return OwnerRef { kind, id: None, stair: false, column: false, railing: false, glass: i == OPENING_GLASS, perforated: false, opening: true, terrain: false };
+                return OwnerRef { kind, id: None, stair: false, column: false, railing: false, glass: i == OPENING_GLASS, perforated: false, opening: true, terrain: false, terrain_side: false };
             }
             let (id, stair, column, railing) = match kind {
                 Kind::Wall => (walls_r.get(i).map(|w| w.wall_id.clone()), false, false, false),
@@ -394,7 +396,7 @@ pub(crate) fn model_view_faces(p: &Project, vis: &Visibility, view: &dyn Fn([f64
             };
             let glass = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(_, Some(RailingKind::Glass))));
             let perforated = railing && matches!(kind, Kind::Slab) && matches!(slabs.get(i), Some(SlabOwner::Railing(_, Some(RailingKind::Perforated))));
-            OwnerRef { kind, id, stair, column, railing, glass, perforated, opening: false, terrain: false }
+            OwnerRef { kind, id, stair, column, railing, glass, perforated, opening: false, terrain: false, terrain_side: false }
         })
         .collect();
     Ok((vf, refs))

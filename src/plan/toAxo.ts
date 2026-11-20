@@ -20,6 +20,8 @@ export interface AxoOptions extends Doc3d {
   /** Sichtbare Klassen (fehlt: alle). Bauteile ausgeblendeter Klassen verdecken auch nichts. */
   visibleCodes?: Set<string>;
   mono?: boolean;
+  /** [308] Zuschnitt des Geländes: "parcel" (Vorgabe: Parzelle + 2 m, sonst Gebäude + 5 m, mit Sockel) | "building" | "none" (weit, ohne Sockel). */
+  terrainClip?: "parcel" | "building" | "none";
   /** Massstabsnenner (Strichstärken nach Massstab); Vorgabe 100. */
   scaleDenominator?: number;
   /** [271] Umbaufilter (Id oder Name) und Etappe. */

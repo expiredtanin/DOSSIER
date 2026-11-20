@@ -22,6 +22,7 @@
 //! Klassen ([180]): jede Linie und Fläche gehört zu einem Bauteil und verschwindet mit dessen Klasse (Bauteile
 //! ausgeblendeter Klassen nehmen an der Verdeckung nicht teil).
 
+use super::axo_terrain::TerrainClip;
 use super::prim::Primitive;
 use super::section::{line, polygon, v2, Kind, OwnerRef, Visibility};
 use super::style::no_hatch;
@@ -286,7 +287,7 @@ fn perspective_pass(faces: Vec<hlr::Face>, model_n: Vec<V3>, zref: f64, tan_half
 }
 
 /// Flächen des Modells in der Projektion; `None`, wenn die Projektion entartet ist.
-fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terrain: bool, scale: f64) -> Result<Option<(Prepared, Vec<OwnerRef>)>, String> {
+fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terrain: Option<TerrainClip>, scale: f64) -> Result<Option<(Prepared, Vec<OwnerRef>)>, String> {
     match *proj {
         Projection::Parallel { m, o } => {
             let Some(cof) = cofactor(&m) else { return Ok(None) };
@@ -311,8 +312,8 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
             if vf.faces.len() > FACE_BUDGET && (context || ent.is_some()) {
                 (vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
-            if terrain {
-                super::axo_terrain::add_terrain(p, vis, &view, &view_n, &mut vf, &mut refs);
+            if let Some(clip) = terrain {
+                super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, &mut vf, &mut refs);
             }
             // Modell-Normale = Mᵀ · Normale (die Normale ging über M⁻ᵀ).
             let model_n = vf.faces.iter().map(|f| unit([0, 1, 2].map(|k| m[0][k] * f.normal[0] + m[1][k] * f.normal[1] + m[2][k] * f.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
@@ -336,8 +337,8 @@ fn prepare(p: &Project, proj: &Projection, vis: &Visibility, context: bool, terr
             if vf.faces.len() > FACE_BUDGET && (context || ent.is_some()) {
                 (vf, refs) = super::section::model_view_faces(p, vis, &view, &view_n, false, Some(opening_detail(scale)))?;
             }
-            if terrain {
-                super::axo_terrain::add_terrain(p, vis, &view, &view_n, &mut vf, &mut refs);
+            if let Some(clip) = terrain {
+                super::axo_terrain::add_terrain(p, vis, &view, &view_n, clip, &mut vf, &mut refs);
             }
             let model_n: Vec<V3> = vf.faces.iter().map(|q| unit([0, 1, 2].map(|k| r[k] * q.normal[0] + u[k] * q.normal[1] + f[k] * q.normal[2])).unwrap_or([0.0, 0.0, 1.0])).collect();
             Ok(Some((perspective_pass(vf.faces, model_n, zref, tan_half, aspect), refs)))
@@ -611,8 +612,8 @@ const WINDOW_GLASS_FILL: &str = "#c6d6e0";
 const GLASS_EDGE_MM: f64 = 0.09;
 
 /// [307] Geländefläche: helle, leicht grünliche Tönung (Grauwert `g` der Lage zum Licht moduliert sie).
-fn terrain_tint(g: f64) -> String {
-    let k = 0.93 + 0.07 * ((g - 0.78) / 0.19).clamp(0.0, 1.0);
+fn terrain_tint(g: f64, side: bool) -> String {
+    let k = (0.93 + 0.07 * ((g - 0.78) / 0.19).clamp(0.0, 1.0)) * if side { 0.78 } else { 1.0 };
     let c = |v: f64| (v * k * 255.0).round().clamp(0.0, 255.0) as u32;
     format!("#{:02x}{:02x}{:02x}", c(0.90), c(0.93), c(0.87))
 }
@@ -630,6 +631,8 @@ pub struct AxoArgs {
     pub context: bool,
     /// [307] Gelände zeichnen (Vorgabe an; Klasse des Geländes bleibt massgebend).
     pub terrain: bool,
+    /// [308] Zuschnitt des Geländes (`terrainClip`: `parcel` Vorgabe | `building` | `none`).
+    pub terrain_clip: TerrainClip,
     pub vis: Visibility,
     /// Zeichenmassstab (Nenner) für den Detailgrad der Öffnungen ([305]); die Abfrage `axoPlan` setzt ihn.
     pub scale: f64,
@@ -685,7 +688,7 @@ impl AxoArgs {
             None if !s("cameraId").is_empty() => project_camera(p, s("cameraId"), aspect, center)?,
             None => preset(s("view"), if s("projection").is_empty() { "iso" } else { s("projection") })?,
         };
-        Some(AxoArgs { proj, opts: AxoOpts { hidden: b("hidden", false) || b("hiddenLines", false), fills: b("fills", true) }, context: b("context", false), terrain: b("terrain", true), vis: Visibility::from_json(v), scale: 100.0 })
+        Some(AxoArgs { proj, opts: AxoOpts { hidden: b("hidden", false) || b("hiddenLines", false), fills: b("fills", true) }, context: b("context", false), terrain: b("terrain", true), terrain_clip: TerrainClip::parse(s("terrainClip")).unwrap_or_default(), vis: Visibility::from_json(v), scale: 100.0 })
     }
 }
 
@@ -709,7 +712,7 @@ pub fn snapshot_text(p: &Project, snap: &ViewSnapshot, invisible: &[String]) -> 
 
 /// Plan-Primitive der Axonometrie und ihr Ausmass; `None` ohne sichtbares Bauteil.
 pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Vec<Primitive>, [f64; 4])>, String> {
-    let Some((mut prep, refs)) = prepare(p, &a.proj, &a.vis, a.context, a.terrain, a.scale)? else { return Ok(None) };
+    let Some((mut prep, refs)) = prepare(p, &a.proj, &a.vis, a.context, a.terrain.then_some(a.terrain_clip), a.scale)? else { return Ok(None) };
     // [279] Glas der Glasgeländer verdeckt nichts (Linien und Flächen dahinter bleiben sichtbar).
     for f in &mut prep.faces {
         f.occludes = !refs.get(f.owner as usize).is_some_and(|r| r.glass);
@@ -725,10 +728,11 @@ pub fn axo_primitives(p: &Project, a: &AxoArgs, mono: bool) -> Result<Option<(Ve
     // Glas ([279]) zuletzt und durchscheinend, damit Flächen dahinter durchschimmern.
     let is_glass = |o: u32| refs.get(o as usize).is_some_and(|r| r.glass);
     let is_terrain = |o: u32| refs.get(o as usize).is_some_and(|r| r.terrain);
+    let is_side = |o: u32| refs.get(o as usize).is_some_and(|r| r.terrain_side);
     let is_window = |o: u32| refs.get(o as usize).is_some_and(|r| r.opening);
     let ordered = out.fills.iter().filter(|f| !is_glass(f.2)).chain(out.fills.iter().filter(|f| is_glass(f.2)));
     for (polys, g, o) in ordered {
-        let fill = if is_terrain(*o) { terrain_tint(*g) } else if is_window(*o) && is_glass(*o) { WINDOW_GLASS_FILL.to_string() } else if is_glass(*o) { GLASS_FILL.to_string() } else { grey_hex(*g) };
+        let fill = if is_terrain(*o) { terrain_tint(*g, is_side(*o)) } else if is_window(*o) && is_glass(*o) { WINDOW_GLASS_FILL.to_string() } else if is_glass(*o) { GLASS_FILL.to_string() } else { grey_hex(*g) };
         for poly in polys {
             let ring = simplify(&if poly.len() > 1 { crate::voids::keyhole(poly).0 } else { poly[0].clone() });
             if ring.len() < 3 {

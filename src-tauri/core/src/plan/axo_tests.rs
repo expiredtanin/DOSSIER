@@ -266,7 +266,7 @@ fn axo_zeit() {
     let p: Project = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     let a = args(serde_json::json!({"view": "southeast"}), &p);
     let t = std::time::Instant::now();
-    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, true, 100.0).unwrap().unwrap();
+    let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, Some(TerrainClip::Parcel), 100.0).unwrap().unwrap();
     eprintln!("Flächen: {} in {:?}", prep.faces.len(), t.elapsed());
     let t = std::time::Instant::now();
     let segs = hlr::hidden_lines(&prep.faces, &hlr::Opts { tol: 1e-4, depth_eps: 1e-4, hidden: false, ..hlr::Opts::default() });
@@ -382,7 +382,7 @@ fn fenster_mit_rahmen_und_glas() {
     let p: Project = serde_json::from_str(include_str!("../../tests/fixtures/robust/wettbewerb.json")).unwrap();
     let a = args(serde_json::json!({"view": "southeast"}), &p);
     let parts = |scale: f64| {
-        let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, true, scale).unwrap().expect("Flächen");
+        let (prep, refs) = prepare(&p, &a.proj, &a.vis, false, Some(TerrainClip::Parcel), scale).unwrap().expect("Flächen");
         let n = |glass: bool| prep.faces.iter().filter(|f| refs.get(f.owner as usize).is_some_and(|r| r.opening && r.glass == glass)).count();
         (n(false), n(true))
     };
@@ -401,7 +401,7 @@ fn fenster_mit_rahmen_und_glas() {
     codes.sort();
     codes.dedup();
     let off = args(serde_json::json!({"view": "southeast", "hasVis": true, "invisible": codes}), &p);
-    let (prep, refs) = prepare(&p, &off.proj, &off.vis, false, true, 100.0).unwrap().expect("Flächen");
+    let (prep, refs) = prepare(&p, &off.proj, &off.vis, false, Some(TerrainClip::Parcel), 100.0).unwrap().expect("Flächen");
     assert!(prep.faces.iter().all(|f| !refs.get(f.owner as usize).is_some_and(|r| r.opening)));
 }
 
@@ -420,7 +420,7 @@ fn terrain_fills(prims: &[Primitive]) -> usize {
 #[test]
 fn gelaende_flaeche_mit_umriss_ohne_dreiecksfuge() {
     let p = with_terrain(cubes(&[(0.0, 0.0, 0.0)]));
-    let prims = prims_of(&p, serde_json::json!({"view": "southeast"}));
+    let prims = prims_of(&p, serde_json::json!({"view": "southeast", "terrainClip": "none"}));
     assert!(terrain_fills(&prims) >= 1, "Geländefläche fehlt");
     // Würfel auf dem Gelände: 9 Würfelkanten + 4 Geländekanten, die Diagonale der zwei Dreiecke fehlt.
     let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "terrain": false})));
@@ -431,7 +431,7 @@ fn gelaende_flaeche_mit_umriss_ohne_dreiecksfuge() {
     let mut q = with_terrain(cubes(&[(0.0, 0.0, 0.0)]));
     q.walls.clear();
     q.drawing_levels.clear();
-    let prims = prims_of(&q, serde_json::json!({"view": "southeast"}));
+    let prims = prims_of(&q, serde_json::json!({"view": "southeast", "terrainClip": "none"}));
     assert_eq!(lines(&prims).len(), 4, "{:?}", lines(&prims));
     assert_eq!(terrain_fills(&prims), 1);
 }
@@ -440,11 +440,11 @@ fn gelaende_flaeche_mit_umriss_ohne_dreiecksfuge() {
 fn keller_unter_gelaende_verdeckt() {
     // Würfel unter dem Gelände (Oberkante −0.5): kein Würfel-Strich, nur der Geländerand.
     let p = with_terrain(cubes(&[(0.0, 0.0, -1.5)]));
-    let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast"})));
+    let l = lines(&prims_of(&p, serde_json::json!({"view": "southeast", "terrainClip": "none"})));
     assert_eq!(l.len(), 4, "{l:?}");
     // Gelände aus (Parameter) bzw. Klasse „02“ ausgeblendet: der Würfel erscheint.
     assert_eq!(lines(&prims_of(&p, serde_json::json!({"view": "southeast", "terrain": false}))).len(), 9);
-    let a = args(serde_json::json!({"view": "southeast", "hasVis": true, "invisible": ["02"]}), &p);
+    let a = args(serde_json::json!({"view": "southeast", "terrainClip": "none", "hasVis": true, "invisible": ["02"]}), &p);
     let prims = axo_primitives(&p, &a, false).unwrap().unwrap().0;
     assert_eq!(terrain_fills(&prims), 0);
     assert_eq!(lines(&prims).len(), 9);
@@ -457,6 +457,46 @@ fn baugrube_gibt_das_haus_im_gelaende_frei() {
     let v = |x: f64, y: f64| Vec2 { x, y };
     let pit = Excavation { id: "bg".into(), outline: vec![v(-3.0, -3.0), v(4.0, -3.0), v(4.0, 4.0), v(-3.0, 4.0)], bottom: -1.5, ..Default::default() };
     q.context.as_mut().unwrap().push(ContextObject::Excavation(pit));
-    let n = lines(&prims_of(&q, serde_json::json!({"view": "southeast"}))).len();
+    let n = lines(&prims_of(&q, serde_json::json!({"view": "southeast", "terrainClip": "none"}))).len();
     assert!(n > 4 + 3, "Würfel in der Baugrube sichtbar: {n}");
+}
+
+/// [308] Gelände 60 × 60 m (zwei Dreiecke) um den Würfel, Parzelle 10 × 10 m.
+fn big_terrain(parcel: bool) -> Project {
+    let mut p = cubes(&[(0.0, 0.0, 0.0)]);
+    let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![-30.0, -30.0, 0.0, 30.0, -30.0, 0.0, 30.0, 30.0, 0.0, -30.0, 30.0, 0.0], indices: vec![0.0, 1.0, 2.0, 0.0, 2.0, 3.0], ..Default::default() };
+    p.context = Some(vec![ContextObject::TerrainMesh(t)]);
+    p.layers.push(serde_json::from_value(serde_json::json!({"code": "02", "name": "Gelände", "color": "#000", "lw": 0.5, "visible": true, "locked": false})).unwrap());
+    if parcel {
+        p.site_rules = serde_json::from_value(serde_json::json!({"parcel": [{"x": -5.0, "y": -5.0}, {"x": 5.0, "y": -5.0}, {"x": 5.0, "y": 5.0}, {"x": -5.0, "y": 5.0}], "defaultSetback": 3.0})).ok();
+    }
+    p
+}
+
+fn extent(p: &Project, v: serde_json::Value) -> (Vec<Primitive>, [f64; 4]) {
+    let a = args(v, p);
+    axo_primitives(p, &a, false).unwrap().unwrap()
+}
+
+#[test]
+fn gelaende_auf_parzelle_zugeschnitten_mit_sockel() {
+    let p = big_terrain(true);
+    let (prims, b) = extent(&p, serde_json::json!({"view": "southeast"}));
+    let (_, b_none) = extent(&p, serde_json::json!({"view": "southeast", "terrainClip": "none"}));
+    assert!((b[2] - b[0]) < 0.9 * (b_none[2] - b_none[0]), "Bild kleiner als ohne Zuschnitt: {b:?} vs {b_none:?}");
+    // Parzelle ± 2 m = 14 m breit, Isometrie: Breite ≈ 14·√2 ≈ 19.8 m.
+    assert!((b[2] - b[0]) < 22.0 && (b[2] - b[0]) > 12.0, "{b:?}");
+    // Sockel: Seitenflächen sind eigene, dunklere Flächen mit Geländebezug.
+    let tints: std::collections::BTreeSet<String> = prims.iter().filter_map(|q| match q {
+        Primitive::Polygon { context_object_id: Some(id), fill, .. } if id == "t" => Some(format!("{fill:?}")),
+        _ => None,
+    }).collect();
+    assert!(tints.len() >= 2, "Oberfläche und Sockelseiten verschieden getönt: {tints:?}");
+    // Ohne Parzelle: Gebäude + 5 m (11 × 11 m Gebäude-Rand → deutlich kleiner als 60 m).
+    let q = big_terrain(false);
+    let (_, bq) = extent(&q, serde_json::json!({"view": "southeast"}));
+    assert!((bq[2] - bq[0]) < 0.9 * (b_none[2] - b_none[0]), "{bq:?}");
+    // Ohne Sockel („none“) keine Seitenflächen.
+    let n_side = |v: serde_json::Value| terrain_fills(&extent(&p, v).0);
+    assert!(n_side(serde_json::json!({"view": "southeast"})) > n_side(serde_json::json!({"view": "southeast", "terrainClip": "none"})));
 }
