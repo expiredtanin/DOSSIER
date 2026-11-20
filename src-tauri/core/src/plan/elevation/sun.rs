@@ -1,8 +1,10 @@
 //! [316] Schlagschatten der Ansicht aus dem Sonnenstand: Schatten = Projektion der Werfer (alle Flächen der Wand-,
 //! Decken-, Dach-, Stützen- und Geländerkörper, auch abgewandte) in Lichtrichtung auf die Ebene jeder sichtbaren
 //! Fläche, nur der Teil vor ihr (zur Sonne hin), beschnitten auf ihren sichtbaren Teil. Von der Sonne abgewandte
-//! Flächen liegen ganz im Eigenschatten. Sonne aus der Schattenstudie des Projekts (`sunStudy.when`, Ort aus dem
-//! Geo-Anker); ohne Studie oder bei Nacht die Zeichenregel 45° von links vorn oben (Licht (1, −1, 1)/√3).
+//! Flächen liegen ganz im Eigenschatten. Licht: Vorgabe ist die Zeichenregel 45° von links vorn oben, für jede
+//! Ansicht gleich relativ zur Blickrichtung (Licht (1, −1, 1)/√3; eine zur Ansicht parallele Fassade ist immer
+//! beleuchtet). Nur mit der Modelldarstellung „Schattenlicht: Sonnenstand“ (`elevation.shadowLight = sun`) die Sonne
+//! der Schattenstudie (`sunStudy.when`, Ort aus dem Geo-Anker); ohne Studie oder bei Nacht auch dann die Zeichenregel.
 //! Gerufen von `elevation_primitives_ren` in `mod.rs`.
 
 use super::*;
@@ -64,8 +66,12 @@ pub(super) fn iso_ms(s: &str) -> Option<f64> {
     Some(secs as f64 * 1000.0 + sec * 1000.0)
 }
 
-/// Lichtrichtung (Ausbreitung, Länge 1) in Ansichtskoordinaten (u rechts, v oben, Tiefe vom Betrachter weg).
-pub(super) fn light_dir(p: &Project, frame: &[f64; 9]) -> [f64; 3] {
+/// Lichtrichtung (Ausbreitung, Länge 1) in Ansichtskoordinaten (u rechts, v oben, Tiefe vom Betrachter weg);
+/// `sun` = Sonnenstand der Schattenstudie statt der Zeichenregel.
+pub(super) fn light_dir(p: &Project, frame: &[f64; 9], sun: bool) -> [f64; 3] {
+    if !sun {
+        return conventional();
+    }
     let Some(ms) = p.sun_study.as_ref().and_then(|s| iso_ms(&s.when)) else { return conventional() };
     let (lat, lon) = crate::plan::extras::project_lat_lon(p);
     let sun = crate::sun::sun_position(lat, lon, ms);

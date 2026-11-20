@@ -1334,10 +1334,15 @@ fn ansicht_haus_kraeftiger_als_nachbar() {
 }
 
 /// [316] Schlagschatten aus dem Sonnenstand der Schattenstudie (Beispielhaus, Ansicht Süd, Ansichts-x = Welt-x + 1).
-fn sun_view(when: Option<&str>, canopy: bool) -> Vec<Vec<Vec2>> {
+/// `sun`: Modelldarstellung der Ansicht mit „Schattenlicht: Sonnenstand“ (sonst Vorgabe Zeichenregel 45°).
+fn sun_view_with(when: Option<&str>, canopy: bool, sun: bool) -> Vec<Vec<Vec2>> {
     let mut p = sample();
     if let Some(w) = when {
         p.sun_study = Some(SunStudy { when: w.into(), show: true, ..Default::default() });
+    }
+    if sun {
+        p.model_view_options = Some(vec![serde_json::from_value(serde_json::json!({"id": "mv", "name": "Sonne", "elevation": {"shadowLight": "sun"}})).unwrap()]);
+        p.drawing_levels.iter_mut().find(|l| l.id == "ansicht-sued").unwrap().model_view_option_id = Some("mv".into());
     }
     if canopy {
         // Vordach 1 m vor der Achse von W1 (Aussenfläche bei y −0.17), x 1.5 … 3.0, in der Geschossdecke des EG.
@@ -1350,6 +1355,10 @@ fn sun_view(when: Option<&str>, canopy: bool) -> Vec<Vec<Vec2>> {
     let level = LevelSpec::from_json(&serde_json::to_value(l).unwrap());
     let (prims, _) = elevation_primitives(&p, &level, true, false, &Visibility::default(), 100.0).unwrap().unwrap();
     prims.iter().filter_map(|q| match q { Primitive::Polygon { fill, pts, .. } if fill == SHADOW_FILL => Some(pts.clone()), _ => None }).collect()
+}
+
+fn sun_view(when: Option<&str>, canopy: bool) -> Vec<Vec<Vec2>> {
+    sun_view_with(when, canopy, when.is_some())
 }
 
 fn in_shadow(shadow: &[Vec<Vec2>], u: f64, v: f64) -> bool {
@@ -1387,6 +1396,13 @@ fn abgewandte_fassade_ganz_im_eigenschatten() {
     // Nachmittag (Süd-West): besonnt, nur Schlagschatten.
     let s = sun_view(Some("2026-06-21T13:30:00Z"), false);
     assert!(!in_shadow(&s, 3.2, 0.3));
+    // Vorgabe (ohne „Sonnenstand“ in der Modelldarstellung): Zeichenregel 45°, auch mit Schattenstudie — die zur
+    // Ansicht parallele Fassade ist beleuchtet, kein flächiger Eigenschatten.
+    let s = sun_view_with(Some("2026-06-21T05:30:00Z"), false, false);
+    for (u, v) in [(1.1, 0.3), (3.2, 2.0), (5.8, 0.3)] {
+        assert!(!in_shadow(&s, u, v), "({u}, {v}) im Schatten: {s:?}");
+    }
+    assert_eq!(s, sun_view(None, false));
 }
 
 #[test]

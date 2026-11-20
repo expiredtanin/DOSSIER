@@ -210,6 +210,7 @@ export const MODEL_VIEW_FIELDS: readonly ModelViewField[] = [
   { section: "columns", key: "cutFill", values: ["material", "solid", "empty"] },
   { section: "elevation", key: "shadows", values: "bool" },
   { section: "elevation", key: "materialHatch", values: "bool" },
+  { section: "elevation", key: "shadowLight", values: ["conventional", "sun"] },
   { section: "site", key: "terrain", values: "bool" },
   { section: "sectionMarks", key: "lineMode", values: ["full", "ends", "none"] },
   { section: "sectionMarks", key: "endLengthMm", values: [6, 9, 12, 15, 20] },

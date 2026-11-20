@@ -707,8 +707,9 @@ pub fn elevation_primitives_ren(p: &Project, level: &LevelSpec, shadows: bool, m
         }
         q
     };
-    // [316] Lichtrichtung aus der Schattenstudie (sonst Zeichenregel 45°), in Ansichtskoordinaten.
-    let light = sun::light_dir(p, &frame);
+    // [316] Lichtrichtung in Ansichtskoordinaten: Zeichenregel 45° (Vorgabe) oder, nach der Modelldarstellung, der
+    // Sonnenstand der Schattenstudie.
+    let light = sun::light_dir(p, &frame, mvo.elevation.sun_light);
     if shadows {
         // Öffnungen (sichtbar): eigene Empfänger in ihrer Ebene (die Wand hat dort ein Loch), Schatten darüber
         // durchscheinend (Glas, Rahmen und Teilungen bleiben lesbar).

@@ -2750,6 +2750,20 @@ pub struct ModelViewColumns {
     pub extra: Extra,
 }
 
+/// [316] Licht der Schlagschatten in der Ansicht: Zeichenregel 45° von links vorn oben (relativ zur Blickrichtung)
+/// oder Sonnenstand der Schattenstudie.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+pub enum ModelViewShadowLight {
+    #[default]
+    #[serde(rename = "conventional")]
+    Conventional,
+    #[serde(rename = "sun")]
+    Sun,
+    #[serde(other)]
+    #[ts(skip)]
+    Unknown,
+}
+
 /// [173] Ansicht (Fassade) in der Modelldarstellung (fehlt ⇒ wie Basis).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -2762,6 +2776,10 @@ pub struct ModelViewElevation {
     #[serde(rename = "materialHatch", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub material_hatch: Option<bool>,
+    /// [316] Licht der Schlagschatten (Basis: Zeichenregel 45°).
+    #[serde(rename = "shadowLight", default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub shadow_light: Option<ModelViewShadowLight>,
     #[serde(flatten)]
     #[ts(skip)]
     pub extra: Extra,
