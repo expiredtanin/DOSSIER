@@ -74,7 +74,7 @@ test("Menü Verbinden: T-Stoss endet an der Fläche der Querwand", async ({ page
   expect(through.end).toEqual({ x: 6, y: 3 });
 });
 
-test("Menü Verbinden: Hinweis nennt den Grund (zu weit, parallel)", async ({ page }) => {
+test("Menü Verbinden: grosse Lücke wird geschlossen ([315]), parallele Wände nennen den Grund", async ({ page }) => {
   await start(page);
   await drawWalls(page, [
     ["0,0", "4,0"],
@@ -82,5 +82,17 @@ test("Menü Verbinden: Hinweis nennt den Grund (zu weit, parallel)", async ({ pa
   ]);
   await blurFocus(page);
   await menuJoin(page);
-  await expect.poll(() => page.evaluate(() => window.__dossierTest!.notices())).toContainEqual(expect.stringMatching(/Abstand zu gross \(2\.00 m, höchstens 0\.\d+ m\)/));
+  // [315] kein Abstandslimit mehr: 2 m Lücke → Ecke bei (6, 0).
+  await expect.poll(async () => (await walls(page)).find((w) => Math.abs(w.start.x) < 1e-6)?.end.x).toBeCloseTo(6, 6);
+});
+
+test("Menü Verbinden: parallele Wände nennen den Grund", async ({ page }) => {
+  await start(page);
+  await drawWalls(page, [
+    ["0,0", "4,0"],
+    ["0,2", "4,2"],
+  ]);
+  await blurFocus(page);
+  await menuJoin(page);
+  await expect.poll(() => page.evaluate(() => window.__dossierTest!.notices())).toContainEqual(expect.stringMatching(/parallel/i));
 });
