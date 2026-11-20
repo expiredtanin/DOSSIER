@@ -192,6 +192,9 @@ pub struct Visibility {
     /// [184] Öffnungen, die im Schnitt nur als Strich erscheinen (grob): im Wandschnitt an Sturz und Brüstung
     /// weder Anschlag-Nase noch Schichteinzug (flache Kante). Vom Aufrufer aus dem Detailgrad gefüllt (`query.rs`).
     pub flat_openings: HashSet<String>,
+    /// [311] Entourage (Möbel, Personen …) mit ihren Ansichtskanten aus dem 3D-Netz statt als Umriss (Massstab feiner als 1:200);
+    /// vom Aufrufer gesetzt (`query.rs`), gehört in den Schlüssel.
+    pub entourage_meshes: bool,
 }
 
 impl Visibility {
@@ -204,6 +207,7 @@ impl Visibility {
             norender: set("norender"),
             grey: set("grey"),
             flat_openings: HashSet::new(),
+            entourage_meshes: false,
         }
     }
     /// `visibleCodes.has(code)` (ohne `visibleCodes`: wahr).
@@ -762,6 +766,10 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     // Element (`terrainMesh`, auch IFC-Gelände seit dem Import, [181]) und wird Geländelinie (`append_terrain_profiles`).
     let mut meshes = crate::mesh_view::meshes(p);
     meshes.retain(|m| shown(&m.mesh.category_code));
+    // [311] Entourage mit 3D-Netz: wie importierte Netze (Ansichtskanten mit Verdeckung, Schnittlinie), hinten angehängt.
+    let n_ctx = meshes.len();
+    let ent = if vis.entourage_meshes { crate::furniture_3d::imported_meshes(p) } else { Vec::new() };
+    meshes.extend(ent.iter().filter(|m| shown(&m.category_code)).filter_map(|m| Some(crate::mesh_view::MeshRef { index: usize::MAX, mesh: m, info: crate::mesh_view::info(m)? })));
     let mut mesh_lines = Vec::new();
     append_mesh_sections(&mut cuts, &mut mesh_lines, &meshes, base, u);
     // [176] Segment eines geknickten Schnitts: Schnittflächen auf den Streifen (sie verdecken nur dort).
@@ -774,6 +782,13 @@ pub(super) fn compute_plane(p: &Project, level: &LevelSpec, bodies: &[BodyMesh],
     // Projektion hinter der Ebene exakt ([G4]); die Schnittflächen verdecken, was hinter ihnen liegt.
     let (mut visible, hidden, occluders) = projection_edges(p, &plane, &walls_r, &wi, &slabs_r, &bodies, &meshes, &cuts, level.hidden_lines, level.depth, strip.map_or(&[][..], |s| &s.half[..]), &skip);
     shaped_projection(&mut visible, p, &walls_r, &plane);
+    // [311] Geschnittene Entourage: nur Umriss (kräftige Linie), keine Fläche mit Schraffur; die Fläche verdeckte oben noch.
+    let (ent_cuts, cuts): (Vec<Cut>, Vec<Cut>) = cuts.into_iter().partition(|c| c.kind == Kind::Mesh && c.index >= n_ctx);
+    for c in ent_cuts {
+        let mut ring = c.pts;
+        ring.push(ring[0]);
+        mesh_lines.push((c.index, ring));
+    }
     let meshes = meshes.iter().map(|m| MeshMeta { id: m.mesh.id.clone(), name: m.mesh.name.clone(), category: Some(m.mesh.category_code.clone()) }).collect();
     let mut out = Output { occluders, cuts, visible, hidden, profiles: Vec::new(), earth: Vec::new(), shoring: Vec::new(), terrain_id: None, meshes, mesh_lines, edge_cats, edge_ids, ground: super::elevation::ground_ref(p, &|c| vis.visible(c) && vis.render(c)) };
     append_terrain_profiles(&mut out, p, base, u);

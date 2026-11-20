@@ -349,12 +349,33 @@ pub fn placed(p: &Project) -> Vec<(usize, Vec<Mesh3>)> {
     out
 }
 
+/// [311] Die Teilnetze der Entourage als `ImportedMesh` (Klasse und Id der Zeichnung, Farbe des Teils), Weltkoordinaten.
+pub fn imported_meshes(p: &Project) -> Vec<crate::model::ImportedMesh> {
+    let hex = |c: [f64; 3]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8);
+    let mut out = Vec::new();
+    for (i, parts) in placed(p) {
+        let d = &p.drawings2d[i];
+        for m in parts {
+            out.push(crate::model::ImportedMesh {
+                id: d.id.clone(),
+                name: d.id.clone(),
+                category_code: d.category_code.clone(),
+                color: Some(hex(m.color)),
+                positions: m.positions,
+                indices: m.indices.iter().map(|&k| k as f64).collect(),
+                ..Default::default()
+            });
+        }
+    }
+    out
+}
+
 /// Kopie des Projekts für Ansichten, die nur Netze aus `Project::context` kennen (3D-Dokument, `plan/axo.rs`): die Teilnetze der
 /// Entourage als `ImportedMesh` mit Klasse und Id der Zeichnung angehängt; `context = false` lässt die übrigen Netze des Kontexts
 /// weg (nur Entourage). [285] Auch die Bäume (`Project.trees`, Stamm + Krone wie im 3D) kommen so hinein. `None`, wenn das
 /// Projekt weder Entourage noch Bäume hat.
 pub fn with_context_meshes(p: &Project, context: bool) -> Option<Project> {
-    let placed = placed(p);
+    let placed = imported_meshes(p);
     let trees = crate::tree::geoms(p);
     if placed.is_empty() && trees.is_empty() {
         return None;
@@ -365,20 +386,7 @@ pub fn with_context_meshes(p: &Project, context: bool) -> Option<Project> {
         ctx.retain(|c| !matches!(c, crate::model::ContextObject::ImportedMesh(_)));
     }
     let hex = |c: [f64; 3]| format!("#{:02x}{:02x}{:02x}", (c[0] * 255.0).round() as u8, (c[1] * 255.0).round() as u8, (c[2] * 255.0).round() as u8);
-    for (i, parts) in placed {
-        let d = &p.drawings2d[i];
-        for m in parts {
-            ctx.push(crate::model::ContextObject::ImportedMesh(crate::model::ImportedMesh {
-                id: d.id.clone(),
-                name: d.id.clone(),
-                category_code: d.category_code.clone(),
-                color: Some(hex(m.color)),
-                positions: m.positions,
-                indices: m.indices.iter().map(|&k| k as f64).collect(),
-                ..Default::default()
-            }));
-        }
-    }
+    ctx.extend(placed.into_iter().map(crate::model::ContextObject::ImportedMesh));
     let list = p.trees.as_deref().unwrap_or(&[]);
     for (i, g) in trees {
         let t = &list[i];

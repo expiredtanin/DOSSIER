@@ -55,6 +55,9 @@ pub fn renovation_view(p: &Project, v: &serde_json::Value, level: &LevelSpec) ->
     crate::renovation::View::editing(view, p, crate::design_options::parse_edit(p, v.get("designOptionEdit")))
 }
 
+/// [311] Ab diesem Massstabsnenner (1:200) zeigt der Schnitt Entourage nur als Umriss, feiner mit Ansichtskanten aus dem Netz.
+const ENTOURAGE_EDGES_BELOW: f64 = 200.0;
+
 /// Abfrage `sectionPlan`: `args` = `[mono, openings, key]` (`key` > 0
 /// = Schlüssel des vorbereiteten Schnitts, s. Cache unten, 0 = immer rechnen),
 /// `text` = `{"level": {...}, "hiddenLines", "hasVis", "invisible", "hasDisplay", "norender", "grey"}`.
@@ -70,6 +73,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
     let scale = v.get("scale").and_then(|s| s.as_f64()).filter(|s| *s > 0.0 && s.is_finite()).unwrap_or(100.0);
     // [33] Eingeschaltete Override-Regeln eines Blatt-Viewports (`rules`: ids; fehlt = Schalter im Projekt).
     let on: Option<HashSet<String>> = v.get("rules").and_then(|a| a.as_array()).map(|a| a.iter().filter_map(|s| s.as_str().map(String::from)).collect());
+    vis.entourage_meshes = scale < ENTOURAGE_EDGES_BELOW;
     let rv = RuleView::at(scale, on.as_ref()).view("section");
     // [33] Regel „Ausblenden“: Schnitt ohne diese Elemente (sie verdecken nichts, Wände samt Öffnungen).
     let mut hidden_ids = crate::plan::overrides::hidden_elements(p, rv);
@@ -122,7 +126,8 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
             .chain(flat.iter().flat_map(|s| s.bytes().chain([0u8])))
             .fold(if empty { 0 } else { 0xcbf2_9ce4_8422_2325u64 }, |h, b| (h ^ b as u64).wrapping_mul(0x0000_0100_0000_01b3))
     };
-    let key = (key, hkey);
+    // [311] Entourage mit Ansichtskanten aus dem 3D-Netz nur in grossen Massstäben (feiner als 1:200); darüber bleibt der Umriss.
+    let key = (key, hkey ^ if vis.entourage_meshes { 0x5bd1_e995_3c6a_1f07 } else { 0 });
     let mut w = crate::plan::buf::Writer::new(true);
     // Der Schnitt selbst hängt nur am Projektstand und an der Ebene (= ein Aufruf von
     // `computeSection` in TS, Schlüssel `key`) und an den ausgeblendeten Klassen (`hkey`); Schwarz-Weiss, graue
@@ -167,7 +172,7 @@ pub fn section_plan_buf(p: &Project, args: &[f64], text: &str) -> Result<Vec<u8>
         .iter()
         .flat_map(|(l, s)| {
             let trees = crate::plan::trees::view_trees(p, l, &vis, None, Some(mono), ren.as_ref());
-            let ent = crate::plan::entourage::view_entourage(p, l, &vis, false, mono);
+            let ent = if vis.entourage_meshes { Vec::new() } else { crate::plan::entourage::view_entourage(p, l, &vis, false, mono) };
             trees.into_iter().chain(ent).map(move |(d, t)| (d, unfold::keep_group(t, s.as_ref())))
         })
         .collect();

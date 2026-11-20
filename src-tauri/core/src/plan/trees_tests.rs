@@ -22,8 +22,12 @@ fn tree_at(id: &str, x: f64, y: f64) -> Value {
 }
 
 fn section(p: &Project) -> Vec<Primitive> {
+    section_at(p, 200.0)
+}
+
+fn section_at(p: &Project, scale: f64) -> Vec<Primitive> {
     let level = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
-    let v = json!({"level": level, "scale": 100, "detail": "mittel"});
+    let v = json!({"level": level, "scale": scale, "detail": "mittel"});
     let buf = crate::queries::run_bin(p, "sectionPlan", &[0.0, 1.0, 0.0], &v.to_string()).unwrap();
     crate::plan::buf::View::parse(&buf).and_then(|v| v.prims()).unwrap_or_default()
 }
@@ -188,8 +192,64 @@ fn entourage_im_schnitt() {
     p.drawings2d.push(person_at("haus", 2.5, 3.0));
     assert!(!entourage_polys(&section(&p), "haus").is_empty(), "Pick-Fläche bleibt");
     let level = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
-    let v = json!({"level": level, "scale": 100, "detail": "mittel", "hasVis": true, "invisible": ["24"]});
+    let v = json!({"level": level, "scale": 200, "detail": "mittel", "hasVis": true, "invisible": ["24"]});
     let buf = crate::queries::run_bin(&p, "sectionPlan", &[0.0, 1.0, 0.0], &v.to_string()).unwrap();
     let off = crate::plan::buf::View::parse(&buf).and_then(|v| v.prims()).unwrap_or_default();
     assert!(entourage_polys(&off, "frei").is_empty(), "Klasse aus");
+}
+
+fn chair_at(id: &str, x: f64, y: f64) -> Drawing2D {
+    serde_json::from_value(json!({"id": id, "type": "drawing2d", "levelId": "eg", "categoryCode": "24", "geom": {"shape": "libobj", "libId": "lib:stuhl", "at": {"x": x, "y": y}, "rotation": 0.0}})).unwrap()
+}
+
+/// Linien im Rechteck `b` = [x0, y0, x1, y1] (beide Endpunkte, mit Toleranz).
+fn lines_in(prims: &[Primitive], b: [f64; 4]) -> Vec<(f64, f64)> {
+    let inside = |p: &Vec2| p.x >= b[0] - 1e-6 && p.x <= b[2] + 1e-6 && p.y >= b[1] - 1e-6 && p.y <= b[3] + 1e-6;
+    prims.iter().filter_map(|q| match q { Primitive::Line { a, b: e, weight_mm, .. } if inside(a) && inside(e) => Some((*weight_mm, a.x)), _ => None }).collect()
+}
+
+/// [311] Schnitt 1:100: Möbel hinter der Ebene zeigen ihre Ansichtskanten aus dem 3D-Netz (mehr als die vier Kanten der Hülle,
+/// alle innerhalb der Hülle) statt eines Umrisses; ab 1:200 bleibt der Umriss; die Klasse schaltet die Kanten ab.
+#[test]
+fn entourage_im_schnitt_ansichtskanten() {
+    let mut p = sample();
+    p.drawings2d.push(chair_at("stuhl", 20.0, 10.0));
+    let hull = {
+        let polys = entourage_polys(&section(&p), "stuhl");
+        assert!(!polys.is_empty(), "1:200: Umriss");
+        polys.iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (_, q)| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])])
+    };
+    let prims = section_at(&p, 100.0);
+    assert!(entourage_polys(&prims, "stuhl").is_empty(), "keine Umriss-Polygone mehr");
+    let l = lines_in(&prims, hull);
+    assert!(l.len() > 8, "Ansichtskanten des Stuhls: {}", l.len());
+    // Mindestens ein Stück der Hülle ist leer (Sitzfläche/Lehne), die Kanten füllen die Hülle nicht nur am Rand.
+    let (xmin, xmax) = (hull[0], hull[2]);
+    assert!(l.iter().any(|&(_, x)| x > xmin + 0.05 * (xmax - xmin) && x < xmax - 0.05 * (xmax - xmin)), "Kanten im Inneren der Hülle");
+    // Ansichtskanten fein (nicht die Schnittstärke).
+    assert!(l.iter().all(|&(w, _)| w <= 0.2 + 1e-9), "{l:?}");
+    // 1:200 und gröber: keine Kantenpracht.
+    assert!(lines_in(&section_at(&p, 200.0), hull).len() < 3);
+    // Klasse aus: nichts.
+    let level = p.drawing_levels.iter().find(|l| l.id == "schnitt-a").unwrap();
+    let v = json!({"level": level, "scale": 100, "detail": "mittel", "hasVis": true, "invisible": ["24"]});
+    let buf = crate::queries::run_bin(&p, "sectionPlan", &[0.0, 1.0, 0.0], &v.to_string()).unwrap();
+    let off = crate::plan::buf::View::parse(&buf).and_then(|v| v.prims()).unwrap_or_default();
+    assert!(lines_in(&off, hull).is_empty(), "Klasse aus");
+}
+
+/// [311] Ein geschnittener Stuhl (Ebene y = 2, Stuhl bei y = 2.1): nur Umriss in Schnittstärke, keine Fläche mit Füllung oder Schraffur.
+#[test]
+fn entourage_geschnitten_nur_umriss() {
+    let mut p = sample();
+    p.drawings2d.push(chair_at("stuhl", 20.0, 2.1));
+    let hull = entourage_polys(&section(&p), "stuhl").iter().fold([f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY], |b, (_, q)| [b[0].min(q[0]), b[1].min(q[1]), b[2].max(q[2]), b[3].max(q[3])]);
+    assert!(hull[0].is_finite());
+    let prims = section_at(&p, 100.0);
+    let l = lines_in(&prims, hull);
+    let heavy = l.iter().filter(|&&(w, _)| w >= 0.25 - 1e-9).count();
+    assert!(heavy >= 3, "Schnittumriss: {l:?}");
+    assert!(l.len() > heavy, "dazu feine Ansichtskanten dahinter");
+    let inside = |q: &Primitive| matches!(q, Primitive::Polygon { pts, .. } if !pts.is_empty() && pts.iter().all(|p| p.x >= hull[0] - 1e-6 && p.x <= hull[2] + 1e-6 && p.y >= hull[1] - 1e-6 && p.y <= hull[3] + 1e-6));
+    assert!(!prims.iter().any(inside), "keine Fläche");
 }
