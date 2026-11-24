@@ -20,6 +20,8 @@ pub struct Obstacles {
     segs: Vec<[P; 2]>,
     /// Geschlossene Flächen (Ringe, ohne Wiederholung des ersten Punkts).
     areas: Vec<Vec<P>>,
+    /// [327] Hüllrechteck je Fläche (gleiche Reihenfolge wie `areas`), für den schnellen Ausschluss.
+    boxes: Vec<[f64; 4]>,
 }
 
 /// Strecken eines Bogens (CCW von `a0` um `sweep`) als Punktfolge.
@@ -66,6 +68,7 @@ impl Obstacles {
     pub fn extend(&mut self, o: &Obstacles) {
         self.segs.extend_from_slice(&o.segs);
         self.areas.extend(o.areas.iter().cloned());
+        self.boxes.extend_from_slice(&o.boxes);
     }
 
     pub fn is_empty(&self) -> bool {
@@ -80,6 +83,7 @@ impl Obstacles {
 
     pub fn area(&mut self, ring: Vec<P>) {
         if ring.len() >= 3 && ring.iter().all(finite) {
+            self.boxes.push(ring_bbox(&ring));
             self.areas.push(ring);
         }
     }
@@ -263,7 +267,9 @@ impl Obstacles {
             }
             x1 >= b[0] && x0 <= b[2] && y1 >= b[1] && y0 <= b[3]
         };
-        Obstacles { segs: self.segs.iter().filter(|s| hit(&s[..])).copied().collect(), areas: self.areas.iter().filter(|a| hit(a)).cloned().collect() }
+        let areas: Vec<Vec<P>> = self.areas.iter().filter(|a| hit(a)).cloned().collect();
+        let boxes = areas.iter().map(|a| ring_bbox(a)).collect();
+        Obstacles { segs: self.segs.iter().filter(|s| hit(&s[..])).copied().collect(), areas, boxes }
     }
 
     /// Wie stark überdeckt das Rechteck (Mitte `c`, halbe Breite/Höhe) Hindernisse? Jede geschnittene Strecke
@@ -324,7 +330,12 @@ impl Obstacles {
                 return d;
             }
         }
-        for a in &self.areas {
+        for (a, bb) in self.areas.iter().zip(&self.boxes) {
+            // [327] Hüllrechteck der Fläche weiter weg als der bisherige Abstand: weder liegt die Mitte darin, noch
+            // unterbietet eine ihrer Kanten das Minimum.
+            if d > 0.0 && (r[0] - bb[2]).max(bb[0] - r[2]).max(r[1] - bb[3]).max(bb[1] - r[3]) >= d {
+                continue;
+            }
             if point_in_ring(a, [c.x, c.y]) {
                 return 0.0;
             }

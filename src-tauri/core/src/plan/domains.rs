@@ -1415,6 +1415,30 @@ fn wrap_variants(text: &str) -> Vec<String> {
     out
 }
 
+/// [327] Pol der Unzugänglichkeit und Stempel-Lagen ([`stamp_candidates`]) eines Raumumrisses, je Umriss gemerkt: beide
+/// hängen nur an den Punkten des Rings (reine Funktionen), kosten aber je Raum eine Suche (im grossen Projekt 10 ms je
+/// Grundriss). Schlüssel sind die Punkte selbst (bitgenau), die Tabelle wird bei 4096 Einträgen geleert.
+fn stamp_spots(ring: &[[f64; 2]]) -> std::rc::Rc<(Vec2, Vec<Vec2>)> {
+    type Key = Vec<[u64; 2]>;
+    thread_local! {
+        static SPOTS: std::cell::RefCell<HashMap<Key, std::rc::Rc<(Vec2, Vec<Vec2>)>>> = std::cell::RefCell::new(HashMap::new());
+    }
+    let key: Key = ring.iter().map(|q| [q[0].to_bits(), q[1].to_bits()]).collect();
+    if let Some(v) = SPOTS.with(|m| m.borrow().get(&key).cloned()) {
+        return v;
+    }
+    let pole = pv(crate::room_area::label_point(ring));
+    let v = std::rc::Rc::new((pole, stamp_candidates(ring, pole)));
+    SPOTS.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 4096 {
+            m.clear();
+        }
+        m.insert(key, v.clone());
+    });
+    v
+}
+
 /// [140] Lagen für einen Raumstempel ohne eigenen Anker: zuerst der Pol der Unzugänglichkeit, dann Punkte
 /// eines Rasters über dem Raum (nach Abstand zum Pol) — passt der Stempel am Pol nicht (L-Raum, Name breiter
 /// als der Flügel um den Pol), rückt er dorthin, wo er ganz im Raum liegt.
@@ -1599,13 +1623,33 @@ fn gap_candidates(ring: &[[f64; 2]], obst: &super::stamp_place::Obstacles, pole:
 /// Überdeckung (`Obstacles::overlap`, Gleichstand → mit Luft, dann näher am Pol); ohne Hindernisse wie bisher.
 /// `free`: nur eine freie Lage (Abstand > 0), sonst `None`.
 fn place_stamp(ring: &[[f64; 2]], candidates: &[Vec2], obst: &super::stamp_place::Obstacles, clear: f64, w: f64, h: f64, free: bool) -> Option<Vec2> {
-    let inside = |q: &Vec2, k: f64| crate::room_area::rect_in_ring(ring, q.x, q.y, k * w / 2.0, k * h / 2.0);
+    // [327] Stempel grösser als das Ausmass des Raums: keine Lage liegt im Raum (`rect_in_ring` verlangt alle Kanten
+    // ausserhalb des um 1e-9 verkleinerten Rechtecks) — ohne die Lagen einzeln zu prüfen.
+    let b = ring_bounds(ring);
+    if w - 4e-9 > b[2] - b[0] || h - 4e-9 > b[3] - b[1] {
+        return None;
+    }
+    // Ragt das (wie in `rect_in_ring` um 1e-9 verkleinerte) Rechteck über das Ausmass des Raums, liegt es nicht darin.
+    let inside = |q: &Vec2, k: f64| {
+        let (hw, hh) = (k * w / 2.0 - 1e-9, k * h / 2.0 - 1e-9);
+        if hw > 0.0 && hh > 0.0 && (q.x - hw < b[0] || q.x + hw > b[2] || q.y - hh < b[1] || q.y + hh > b[3]) {
+            return false;
+        }
+        crate::room_area::rect_in_ring(ring, q.x, q.y, k * w / 2.0, k * h / 2.0)
+    };
     if !obst.is_empty() {
         // Beste freie Lage unter `cands` (grösster Abstand, Gleichstand → die frühere).
         let free_pass = |cands: &[Vec2]| -> Option<Vec2> {
+            // [327] Lagen, die mit Luft (1.3) im Raum lagen und nicht frei waren, sind es knapp (1.0) auch nicht
+            // (gleiches Rechteck, gleicher Abstand): nicht nochmals prüfen.
+            let mut tried = vec![false; cands.len()];
             for k in [1.3, 1.0] {
                 let mut best: Option<(f64, Vec2)> = None;
-                for q in cands.iter().filter(|q| inside(q, k)) {
+                for (i, q) in cands.iter().enumerate() {
+                    if tried[i] || !inside(q, k) {
+                        continue;
+                    }
+                    tried[i] = true;
                     // [179] Wie `obst.clearance(..).min(clear)`, aber ohne ferne Hindernisse und ohne Lagen, die `best` nicht schlagen.
                     let d = obst.clearance_capped(*q, w / 2.0, h / 2.0, clear, best.map_or(0.0, |(b, _)| b));
                     if d > 0.0 && best.is_none_or(|(b, _)| d > b) {
@@ -1686,7 +1730,9 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
         }
         // [140] Ohne eigenen Anker: Pol der Unzugänglichkeit (liegt auch in L-Räumen im Raum); passt der
         // Stempel dort nicht, rückt er im Raum dorthin, wo er passt (`stamp_candidates`).
-        let pole = pv(crate::room_area::label_point(&pts));
+        // [327] Pol und Kandidaten hängen nur am Umriss: je Umriss gemerkt (vorher je Grundriss neu gesucht).
+        let spots = stamp_spots(&pts);
+        let pole = spots.0;
         let at = room.stamp_anchor.unwrap_or(pole);
         let small = c.a.scale >= ROOM_STAMP_SMALL_FROM;
         // [140] Übersicht (ab 1:500, automatisch grob): nur der Name.
@@ -1736,7 +1782,8 @@ fn rooms(c: &Ctx, out: &mut Vec<Primitive>, top: &mut Vec<Primitive>, bounds: &m
                 extra_lines.push(StampLine { text: label, align: Align::Left, marks: stamp_extra_marks(None, room.stamp.as_ref().and_then(|s| s.font.as_ref())) });
             }
         }
-        let candidates = if room.stamp_anchor.is_some() { vec![at] } else { stamp_candidates(&pts, pole) };
+        let own = [at];
+        let candidates: &[Vec2] = if room.stamp_anchor.is_some() { &own } else { &spots.1 };
         // [140] Teil 6: ohne eigenen Anker weicht der Stempel anderem Planinhalt im Raum aus (`place_stamp`).
         let obst = if room.stamp_anchor.is_some() { Default::default() } else { obstacles.within(ring_bounds(&pts)) };
         let clear = STAMP_CLEAR_MM * c.a.scale / 1000.0;
@@ -2586,6 +2633,25 @@ mod tests {
 
     fn sample() -> Project {
         serde_json::from_str(include_str!("../../tests/fixtures/sample_project.json")).unwrap()
+    }
+
+    /// [327] Gemerkte Stempel-Lagen wie frisch gerechnet (auch beim zweiten Aufruf); ein Stempel grösser als der Raum
+    /// hat keine Lage, einer der knapp passt schon.
+    #[test]
+    fn stempel_lagen_gemerkt_wie_gerechnet() {
+        let ring = vec![[0.0, 0.0], [6.0, 0.0], [6.0, 2.0], [2.0, 2.0], [2.0, 5.0], [0.0, 5.0]];
+        let pole = pv(crate::room_area::label_point(&ring));
+        let want = stamp_candidates(&ring, pole);
+        for _ in 0..2 {
+            let got = stamp_spots(&ring);
+            assert_eq!((got.0.x, got.0.y), (pole.x, pole.y));
+            assert_eq!(got.1.iter().map(|q| (q.x, q.y)).collect::<Vec<_>>(), want.iter().map(|q| (q.x, q.y)).collect::<Vec<_>>());
+        }
+        let mut o = super::super::stamp_place::Obstacles::default();
+        o.seg([0.5, 0.5], [0.6, 0.5]);
+        assert!(place_stamp(&ring, &want, &o, 0.1, 6.5, 0.5, false).is_none());
+        assert!(place_stamp(&ring, &want, &o, 0.1, 0.5, 5.5, false).is_none());
+        assert!(place_stamp(&ring, &want, &o, 0.1, 1.0, 1.0, false).is_some());
     }
 
     fn args(floor: &str, detail: f64, codes: &[&str]) -> PlanArgs {

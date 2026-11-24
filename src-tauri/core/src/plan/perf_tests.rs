@@ -140,9 +140,11 @@ fn bench159() {
         plan_domains_buf(&p, &a).unwrap();
     });
     println!("eg 1:100 mit Schatten: {t:.1} ms");
+    // `BENCH_FLOOR=g0`: Geschoss des Domänen-Profils (Vorgabe „eg“).
+    let floor = std::env::var("BENCH_FLOOR").unwrap_or_else(|_| "eg".into());
     for (scale, sun) in [(100.0, None), (50.0, None), (100.0, sun)] {
-        println!("== Domänen eg 1:{scale}{} ==", if sun.is_some() { " mit Schatten" } else { "" });
-        let a = plan_args(&p, "eg", scale, sun);
+        println!("== Domänen {floor} 1:{scale}{} ==", if sun.is_some() { " mit Schatten" } else { "" });
+        let a = plan_args(&p, &floor, scale, sun);
         let mut rows = domain_profile(&p, &a, runs);
         let total: f64 = rows.iter().map(|r| r.1).sum();
         rows.sort_by(|x, y| y.1.total_cmp(&x.1));
