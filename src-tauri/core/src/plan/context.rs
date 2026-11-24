@@ -465,6 +465,159 @@ pub(super) fn outside_bb(a: Vec2, b: Vec2, rings: &[Vec<Vec2>], bb: [f64; 4]) ->
     ts.sort_by(|x, y| x.total_cmp(y));
     ts.windows(2).filter(|w| w[1] - w[0] > 1e-9 && !rings.iter().any(|r| inside(at((w[0] + w[1]) / 2.0), r))).map(|w| (at(w[0]), at(w[1]))).collect()
 }
+/// [327] Suchraster über die Kanten der Ringe für [`HouseIndex::outside`]: Höhenlinien bestehen aus Zehntausenden kurzen
+/// Strecken, der Fussabdruck (Haus, Terrassen, Baugrube) aus vielen Kanten. Je Strecke nur die Kanten ihrer Zellen;
+/// der Punkt-im-Ring-Test zählt nur die Kanten des waagrechten Streifens des Punkts. Dasselbe Ergebnis wie [`outside_bb`].
+pub(super) struct HouseIndex<'a> {
+    rings: &'a [Vec<Vec2>],
+    bb: [f64; 4],
+    grid: super::stamp_place::BoxGrid,
+    /// Kante `k` = (Ring, Index des Anfangspunkts).
+    edges: Vec<(u32, u32)>,
+    /// Kanten je waagrechtem Streifen (alle Streifen, die die Kante in y überdeckt): der Punkt-im-Ring-Test zählt nur
+    /// Kanten, die die Höhe des Punkts überspannen.
+    rows: Vec<Vec<u32>>,
+    row_h: f64,
+    scratch: std::cell::RefCell<Vec<u32>>,
+}
+
+impl<'a> HouseIndex<'a> {
+    pub(super) fn new(rings: &'a [Vec<Vec2>]) -> HouseIndex<'a> {
+        let bb = rings_bbox(rings);
+        let mut edges = Vec::new();
+        let mut boxes = Vec::new();
+        for (ri, r) in rings.iter().enumerate() {
+            let n = r.len();
+            for i in 0..n {
+                let (p, q) = (r[i], r[(i + 1) % n]);
+                edges.push((ri as u32, i as u32));
+                boxes.push([p.x.min(q.x), p.y.min(q.y), p.x.max(q.x), p.y.max(q.y)]);
+            }
+        }
+        let n_rows = edges.len().clamp(1, 2048);
+        let row_h = ((bb[3] - bb[1]) / n_rows as f64).max(1e-9);
+        let mut rows = vec![Vec::new(); if edges.is_empty() || !bb.iter().all(|v| v.is_finite()) { 0 } else { n_rows }];
+        if !rows.is_empty() {
+            for (k, b) in boxes.iter().enumerate() {
+                if !(b[1].is_finite() && b[3].is_finite()) {
+                    // Unsinnige Kante: in alle Streifen (der Test selbst verwirft sie wie bisher).
+                    rows.iter_mut().for_each(|r| r.push(k as u32));
+                    continue;
+                }
+                let row = |y: f64| (((y - bb[1]) / row_h).floor().max(0.0) as usize).min(n_rows - 1);
+                for r in row(b[1])..=row(b[3]) {
+                    rows[r].push(k as u32);
+                }
+            }
+        }
+        HouseIndex { rings, bb, grid: super::stamp_place::BoxGrid::new(&boxes), edges, rows, row_h, scratch: Default::default() }
+    }
+
+    /// Liegt `q` in einem Ring? Wie [`inside`] je Ring (gleiche Rechnung je Kante), aber nur über die Kanten des Streifens.
+    fn inside_any(&self, q: Vec2) -> bool {
+        if self.rows.is_empty() || self.rings.len() > 128 || !(q.y >= self.bb[1] && q.y <= self.bb[3]) {
+            // Ausserhalb der Höhe aller Ringe überspannt keine Kante den Punkt; sonst (Sonderfälle) voll rechnen.
+            return if self.rows.is_empty() || self.rings.len() > 128 { self.rings.iter().any(|r| inside(q, r)) } else { false };
+        }
+        let row = (((q.y - self.bb[1]) / self.row_h).floor().max(0.0) as usize).min(self.rows.len() - 1);
+        let mut odd: u128 = 0;
+        for &k in &self.rows[row] {
+            let (ri, i) = self.edges[k as usize];
+            let r = &self.rings[ri as usize];
+            // Kante r[i]–r[i+1]; in [`inside`] ist a der spätere, b der frühere Punkt.
+            let (b, a) = (r[i as usize], r[(i as usize + 1) % r.len()]);
+            if (a.y > q.y) != (b.y > q.y) && q.x < (b.x - a.x) * (q.y - a.y) / (b.y - a.y) + a.x {
+                odd ^= 1u128 << ri;
+            }
+        }
+        odd != 0
+    }
+
+    /// Überlappt (oder berührt) der Ring `ring` (Rechteck einer Beschriftung) einen der Ringe? Dasselbe Ergebnis wie
+    /// `stamp_place::convex_overlap` je Ring mit Rechteck-Vorprüfung: eine Ecke des einen im anderen oder Kanten kreuzen sich.
+    pub(super) fn overlaps(&self, ring: &[[f64; 2]]) -> bool {
+        use super::stamp_place::{point_in_ring, ring_bbox, segs_cross};
+        if ring.len() < 3 {
+            return false;
+        }
+        let b = ring_bbox(ring);
+        let bb = self.bb;
+        if b[2] < bb[0] || b[0] > bb[2] || b[3] < bb[1] || b[1] > bb[3] {
+            return false;
+        }
+        // Erste Ecke eines Rings im Rechteck der Beschriftung?
+        if self.rings.iter().any(|h| h.len() >= 3 && point_in_ring(ring, [h[0].x, h[0].y])) {
+            return true;
+        }
+        let mut scratch = self.scratch.borrow_mut();
+        // Kanten kreuzen sich?
+        self.grid.query(b, &mut scratch);
+        let n = ring.len();
+        for &k in scratch.iter() {
+            let (ri, i) = self.edges[k as usize];
+            let r = &self.rings[ri as usize];
+            if r.len() < 3 {
+                continue;
+            }
+            let (p, q) = (r[i as usize], r[(i as usize + 1) % r.len()]);
+            // Kanten neben dem Rechteck der Beschriftung können sie weder kreuzen noch berühren.
+            if p.x.max(q.x) < b[0] || p.x.min(q.x) > b[2] || p.y.max(q.y) < b[1] || p.y.min(q.y) > b[3] {
+                continue;
+            }
+            if (0..n).any(|j| segs_cross([p.x, p.y], [q.x, q.y], ring[j], ring[(j + 1) % n])) {
+                return true;
+            }
+        }
+        // Erste Ecke der Beschriftung in einem Ring?
+        let q = v2(ring[0][0], ring[0][1]);
+        if self.rings.iter().all(|r| r.len() >= 3) {
+            self.inside_any(q)
+        } else {
+            self.rings.iter().any(|r| r.len() >= 3 && inside(q, r))
+        }
+    }
+
+    /// Teile der Strecke a–b ausserhalb aller Ringe (wie [`outside_bb`]).
+    pub(super) fn outside(&self, a: Vec2, b: Vec2) -> Vec<(Vec2, Vec2)> {
+        let bb = self.bb;
+        if a.x.max(b.x) < bb[0] || a.x.min(b.x) > bb[2] || a.y.max(b.y) < bb[1] || a.y.min(b.y) > bb[3] {
+            return vec![(a, b)];
+        }
+        let (dx, dy) = (b.x - a.x, b.y - a.y);
+        let (lo_x, hi_x, lo_y, hi_y) = (a.x.min(b.x), a.x.max(b.x), a.y.min(b.y), a.y.max(b.y));
+        let mut scratch = self.scratch.borrow_mut();
+        self.grid.query([lo_x, lo_y, hi_x, hi_y], &mut scratch);
+        let mut ts = vec![0.0, 1.0];
+        let mut near = false;
+        for &k in scratch.iter() {
+            let (ri, i) = self.edges[k as usize];
+            let r = &self.rings[ri as usize];
+            let (p, q) = (r[i as usize], r[(i as usize + 1) % r.len()]);
+            if p.x.max(q.x) < lo_x || p.x.min(q.x) > hi_x || p.y.max(q.y) < lo_y || p.y.min(q.y) > hi_y {
+                continue;
+            }
+            near = true;
+            let (ex, ey) = (q.x - p.x, q.y - p.y);
+            let den = dx * ey - dy * ex;
+            if den.abs() < 1e-15 {
+                continue;
+            }
+            let t = ((p.x - a.x) * ey - (p.y - a.y) * ex) / den;
+            let u = ((p.x - a.x) * dy - (p.y - a.y) * dx) / den;
+            if t > 0.0 && t < 1.0 && (0.0..=1.0).contains(&u) {
+                ts.push(t);
+            }
+        }
+        let at = |t: f64| v2(a.x + dx * t, a.y + dy * t);
+        if !near {
+            // Ganz innerhalb (ohne Kantenberührung) oder ganz ausserhalb.
+            return if self.inside_any(a) { vec![] } else { vec![(a, b)] };
+        }
+        ts.sort_by(|x, y| x.total_cmp(y));
+        ts.windows(2).filter(|w| w[1] - w[0] > 1e-9 && !self.inside_any(at((w[0] + w[1]) / 2.0))).map(|w| (at(w[0]), at(w[1]))).collect()
+    }
+}
+
 const EXCAVATION_INK: &str = "#1f242c";
 /// [68] Warnmarke: Arbeitsraum zu schmal.
 const WS_WARN_INK: &str = "#d6001c";
@@ -728,12 +881,8 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
     });
     let ContourData { isos, drawn, grid } = &*data;
     let obst_grid = super::stamp_place::ObstacleGrid::new(obst, 4.0 * text_h);
-    let house_p: Vec<Vec<[f64; 2]>> = house.iter().map(|r| r.iter().map(|q| [q.x, q.y]).collect()).collect();
-    let house_b: Vec<[f64; 4]> = house_p.iter().map(|r| super::stamp_place::ring_bbox(r)).collect();
-    let in_house = |ring: &[[f64; 2]]| {
-        let b = super::stamp_place::ring_bbox(ring);
-        house_p.iter().zip(&house_b).any(|(h, hb)| hb[2] >= b[0] && hb[0] <= b[2] && hb[3] >= b[1] && hb[1] <= b[3] && super::stamp_place::convex_overlap(h, ring))
-    };
+    let house_idx = HouseIndex::new(house);
+    let in_house = |ring: &[[f64; 2]]| house_idx.overlaps(ring);
     // Beschriftungen: Zähllinien, längste zuerst.
     let digits = if iv.fract() == 0.0 { 0 } else { 1 };
     let mut order: Vec<usize> = (0..isos.len()).filter(|i| isos[*i].index && isos[*i].len() >= 12.0 * text_h).collect();
@@ -838,7 +987,6 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
         }
     }
     // Linien: ohne die Lücken unter den Beschriftungen, ausserhalb des Fussabdrucks.
-    let house_bb = rings_bbox(house);
     for (li, l) in isos.iter().enumerate() {
         // [140] Zähllinie mittel (0.18), Höhenlinie fein (0.1): Gelände bleibt unter dem Gebäude zurück.
         let w = if l.index { 0.18 } else { 0.1 };
@@ -870,7 +1018,7 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
             for (f0, f1) in spans {
                 let pt = |f: f64| v2(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
                 // [256] … und vor Masszahlen, Texten und Höhenkoten der Zeichnungen (Höhenlinien durch „17.39“, komplex EG Süd).
-                for (p0, p1) in outside_bb(pt(f0), pt(f1), house, house_bb).into_iter().flat_map(|(p, q)| c.cut_at_gaps(p, q)) {
+                for (p0, p1) in house_idx.outside(pt(f0), pt(f1)).into_iter().flat_map(|(p, q)| c.cut_at_gaps(p, q)) {
                     out.push(ink_line(p0, p1, w, TERRAIN_INK, None));
                 }
             }
@@ -1324,6 +1472,48 @@ pub fn plan_section_lines(c: &Ctx, out: &mut Vec<Primitive>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [327] Das Suchraster liefert dasselbe wie die volle Rechnung: Strecken ausserhalb der Ringe ([`outside_bb`]) und
+    /// Überlappung eines Rechtecks mit den Ringen (`convex_overlap` je Ring mit Rechteck-Vorprüfung), auf vielen
+    /// zufälligen Strecken und Rechtecken um ein L-förmiges Haus mit Bogen, Hof und einem zweiten Ring.
+    #[test]
+    fn house_index_wie_volle_rechnung() {
+        let mut house: Vec<Vec<Vec2>> = vec![
+            vec![v2(0.0, 0.0), v2(10.0, 0.0), v2(10.0, 4.0), v2(5.0, 4.0), v2(5.0, 9.0), v2(0.0, 9.0)],
+            (0..40).map(|i| { let t = i as f64 / 40.0 * std::f64::consts::TAU; v2(14.0 + 2.0 * t.cos(), 3.0 + 2.0 * t.sin()) }).collect(),
+            vec![v2(-6.0, -3.0), v2(-2.0, -3.5), v2(-3.0, 1.0)],
+        ];
+        house.push(vec![v2(20.0, 20.0), v2(21.0, 20.0)]); // entarteter Ring
+        let idx = HouseIndex::new(&house);
+        let bb = rings_bbox(&house);
+        let mut seed = 0x2545_F491_4F6C_DD1Du64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let house_p: Vec<Vec<[f64; 2]>> = house.iter().map(|r| r.iter().map(|q| [q.x, q.y]).collect()).collect();
+        let house_b: Vec<[f64; 4]> = house_p.iter().map(|r| super::super::stamp_place::ring_bbox(r)).collect();
+        for k in 0..20_000 {
+            let len = if k % 3 == 0 { 8.0 } else { 0.4 };
+            let a = v2(-9.0 + 34.0 * rnd(), -6.0 + 30.0 * rnd());
+            let b = v2(a.x + len * (rnd() - 0.5), a.y + len * (rnd() - 0.5));
+            // Auch Strecken genau auf Kanten und durch Ecken.
+            let (a, b) = if k % 50 == 0 { (v2(2.0, 0.0), v2(8.0, 0.0)) } else if k % 51 == 0 { (v2(10.0, -1.0), v2(10.0, 5.0)) } else { (a, b) };
+            let want = outside_bb(a, b, &house, bb);
+            let got = idx.outside(a, b);
+            assert_eq!(want.len(), got.len(), "Strecke {a:?}–{b:?}");
+            for (w, g) in want.iter().zip(&got) {
+                assert!(w.0.x == g.0.x && w.0.y == g.0.y && w.1.x == g.1.x && w.1.y == g.1.y, "Strecke {a:?}–{b:?}: {w:?} / {g:?}");
+            }
+            let (m, u, hw, hv) = ([a.x, a.y], { let l = (b.x - a.x).hypot(b.y - a.y).max(1e-9); [(b.x - a.x) / l, (b.y - a.y) / l] }, 0.2 + rnd(), 0.1 + 0.3 * rnd());
+            let rect = rot_rect(m, u, hw, hv);
+            let rb = super::super::stamp_place::ring_bbox(&rect);
+            let want = house_p.iter().zip(&house_b).any(|(h, hb)| hb[2] >= rb[0] && hb[0] <= rb[2] && hb[3] >= rb[1] && hb[1] <= rb[3] && super::super::stamp_place::convex_overlap(h, &rect));
+            assert_eq!(want, idx.overlaps(&rect), "Rechteck {rect:?}");
+        }
+    }
 
     /// Oberstes Kontext-Pick-Band unter dem Punkt (wie `PickIndex::polygons_at` mit Maske „Kontext").
     fn top_context(out: &[Primitive], x: f64, y: f64) -> Option<String> {

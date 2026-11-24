@@ -185,6 +185,7 @@ fn bench159() {
         let walls: Vec<String> = p.walls.iter().filter(|w| w.floor_id == "eg").map(|w| w.id.clone()).take(1).chain(p.walls.iter().filter(|w| w.id == "eg-iw-y5").map(|w| w.id.clone())).collect();
         for wall in walls {
             let mut i = 0;
+            let mut commit_ms = 0.0;
             let t2 = avg(runs, || {
                 i += 1;
                 let mut w = serde_json::to_value(doc.project().unwrap().walls.iter().find(|w| w.id == wall).unwrap()).unwrap();
@@ -193,10 +194,12 @@ fn bench159() {
                 w["start"]["x"] = serde_json::json!(w["start"]["x"].as_f64().unwrap() + dx);
                 w["end"]["x"] = serde_json::json!(w["end"]["x"].as_f64().unwrap() + dx);
                 let o = crate::ops::ops_from_json(&serde_json::json!([{ "kind": "replace", "collection": "walls", "entity": w }])).unwrap();
+                let t = Instant::now();
                 doc.commit(o, None, i as f64 * 1e4, false).unwrap();
+                commit_ms += ms(t);
                 call(&mut doc);
             });
-            line += &format!(", nach {wall} verschieben {t2:.1} ms");
+            line += &format!(", nach {wall} verschieben {t2:.1} ms (davon commit {:.1} ms)", commit_ms / (runs + 1) as f64);
         }
         println!("{line}");
     }

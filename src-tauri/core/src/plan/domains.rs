@@ -179,6 +179,8 @@ pub struct Ctx<'a> {
     /// [269] Die Hindernisse werden gerade gerechnet: Führungslinien setzen dann nicht aus (sonst Rekursion).
     obst_busy: std::cell::Cell<bool>,
     bubble_obst: std::cell::OnceCell<super::stamp_place::Obstacles>,
+    /// [327] Suchraster über die Aussparungen ([`Self::line_gaps`]): eine Strecke prüft nur die Flächen in ihrer Nähe.
+    gaps_grid: std::cell::OnceCell<super::stamp_place::BoxGrid>,
     /// [207] Linienzüge der Strassen-Klasse („11“) je Geschoss für Strassennamen entlang der Achse (`plan/text_curve.rs`).
     road_axes: std::cell::OnceCell<Vec<(String, Vec<crate::model::Vec2>)>>,
     /// [271] Umbaufilter dieser Plan-Erzeugung (ausgeblendete Elemente stehen zusätzlich in `hidden`).
@@ -202,7 +204,7 @@ impl<'a> Ctx<'a> {
         }
         let mv_sel = super::model_view::selected_id(p, &a.floor, a.model_view.as_deref()).and_then(|id| super::model_view::find(p, id));
         let mv = super::model_view::resolve(mv_sel, a.detail, a.scale);
-        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), obst_busy: Default::default(), bubble_obst: Default::default(), road_axes: Default::default(), ren }
+        Ctx { p, a, cats, hidden, mv_sel, mv, house: Default::default(), drawn_obst: Default::default(), obst_busy: Default::default(), bubble_obst: Default::default(), gaps_grid: Default::default(), road_axes: Default::default(), ren }
     }
 
     /// [271] Umbaufilter (Farben, Ersatzstücke der Öffnungen); `None` ohne Filter.
@@ -256,7 +258,11 @@ impl<'a> Ctx<'a> {
             return vec![(a, b)];
         }
         let pad = LINE_GAP_MM * self.a.scale.max(1.0) / 1000.0;
-        g.cut_out([a.x, a.y], [b.x, b.y], pad).into_iter().map(|[p, q]| (Vec2 { x: p[0], y: p[1] }, Vec2 { x: q[0], y: q[1] })).collect()
+        // [327] Höhenlinien bestehen aus Zehntausenden Strecken, die Aussparungen liegen ums Haus: nur die Flächen nahe der
+        // Strecke prüfen (Suchraster, dasselbe Ergebnis).
+        let grid = self.gaps_grid.get_or_init(|| g.area_grid());
+        let mut near = Vec::new();
+        g.cut_out_near([a.x, a.y], [b.x, b.y], pad, grid, &mut near).into_iter().map(|[p, q]| (Vec2 { x: p[0], y: p[1] }, Vec2 { x: q[0], y: q[1] })).collect()
     }
 
     /// [207] Strassenachsen und -ränder (Linie, Polylinie, Bogen auf der Klasse „11“) als Linienzüge mit ihrer Ebene.

@@ -158,13 +158,33 @@ impl Obstacles {
         }
     }
 
+    /// [327] Suchraster über die Rechtecke der Flächen (für [`Self::cut_out_near`]).
+    pub fn area_grid(&self) -> BoxGrid {
+        BoxGrid::new(&self.areas.iter().map(|r| ring_bbox(r)).collect::<Vec<_>>())
+    }
+
+    /// [327] Wie [`Self::cut_out`], prüft aber nur die Flächen, die das Suchraster `grid` ([`Self::area_grid`]) nahe der
+    /// Strecke meldet — dasselbe Ergebnis (jede Fläche, deren Rechteck die aufgeweitete Strecke berührt, ist dabei).
+    pub fn cut_out_near(&self, a: P, b: P, pad: f64, grid: &BoxGrid, scratch: &mut Vec<u32>) -> Vec<[P; 2]> {
+        grid.query([a[0].min(b[0]) - pad, a[1].min(b[1]) - pad, a[0].max(b[0]) + pad, a[1].max(b[1]) + pad], scratch);
+        if scratch.is_empty() {
+            return vec![[a, b]];
+        }
+        self.cut_out_of(a, b, pad, scratch.iter().map(|i| *i as usize))
+    }
+
     /// [256] Die Strecke a–b ohne die Teile in den (konvexen) Flächen, je um `pad` aufgeweitet — Linien setzen vor
     /// Masszahlen und Texten aus (Baulinie durch „2.69“). Liegt nichts darin: die Strecke selbst. Stücke kürzer als 1e-9 entfallen.
     pub fn cut_out(&self, a: P, b: P, pad: f64) -> Vec<[P; 2]> {
+        self.cut_out_of(a, b, pad, 0..self.areas.len())
+    }
+
+    /// [`Self::cut_out`] über die Flächen `which` (Indizes, aufsteigend).
+    fn cut_out_of(&self, a: P, b: P, pad: f64, which: impl Iterator<Item = usize>) -> Vec<[P; 2]> {
         let d = [b[0] - a[0], b[1] - a[1]];
         let mut cuts: Vec<(f64, f64)> = Vec::new();
         let (sx0, sx1, sy0, sy1) = (a[0].min(b[0]) - pad, a[0].max(b[0]) + pad, a[1].min(b[1]) - pad, a[1].max(b[1]) + pad);
-        for ring in &self.areas {
+        for ring in which.filter_map(|i| self.areas.get(i)) {
             let n = ring.len();
             let bb = ring_bbox(ring);
             if n < 3 || bb[2] < sx0 || bb[0] > sx1 || bb[3] < sy0 || bb[1] > sy1 {
@@ -417,6 +437,84 @@ impl<'a> ObstacleGrid<'a> {
 }
 
 /// Achsparalleles Rechteck `[x0, y0, x1, y1]` um die Punkte.
+/// [327] Gleichmässiges Suchraster über achsparallele Rechtecke `[x0, y0, x1, y1]`: [`BoxGrid::query`] liefert die Indizes
+/// aller Rechtecke, deren Zellen ein Suchrechteck berühren (Obermenge der wirklich berührenden; aufsteigend, ohne
+/// Doppelte). Rechtecke mit nicht endlichen Werten gelten als überall nah.
+pub struct BoxGrid {
+    x0: f64,
+    y0: f64,
+    cell: f64,
+    nx: usize,
+    ny: usize,
+    cells: Vec<Vec<u32>>,
+    always: Vec<u32>,
+}
+
+impl BoxGrid {
+    pub fn new(boxes: &[[f64; 4]]) -> BoxGrid {
+        let ok = |b: &[f64; 4]| b.iter().all(|v| v.is_finite()) && b[2] >= b[0] && b[3] >= b[1];
+        let mut bb = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+        for b in boxes.iter().filter(|b| ok(b)) {
+            bb = [bb[0].min(b[0]), bb[1].min(b[1]), bb[2].max(b[2]), bb[3].max(b[3])];
+        }
+        let n = boxes.iter().filter(|b| ok(b)).count();
+        let always: Vec<u32> = boxes.iter().enumerate().filter(|(_, b)| !ok(b)).map(|(i, _)| i as u32).collect();
+        if n == 0 {
+            return BoxGrid { x0: 0.0, y0: 0.0, cell: 1.0, nx: 0, ny: 0, cells: Vec::new(), always };
+        }
+        let (w, h) = ((bb[2] - bb[0]).max(1e-9), (bb[3] - bb[1]).max(1e-9));
+        // Etwa zwei Rechtecke je Zelle, höchstens 256 Zellen je Achse.
+        let cell = (w * h / (n as f64 / 2.0).max(1.0)).sqrt().max(w.max(h) / 256.0).max(1e-9);
+        let (nx, ny) = (((w / cell).floor() as usize + 1).min(257), ((h / cell).floor() as usize + 1).min(257));
+        let mut g = BoxGrid { x0: bb[0], y0: bb[1], cell, nx, ny, cells: vec![Vec::new(); nx * ny], always };
+        for (i, b) in boxes.iter().enumerate().filter(|(_, b)| ok(b)) {
+            let (i0, j0, i1, j1) = g.span(*b);
+            for j in j0..=j1 {
+                for k in i0..=i1 {
+                    g.cells[j * nx + k].push(i as u32);
+                }
+            }
+        }
+        g
+    }
+
+    /// Zellbereich eines Rechtecks, auf das Raster geklemmt.
+    fn span(&self, b: [f64; 4]) -> (usize, usize, usize, usize) {
+        let ix = |x: f64| (((x - self.x0) / self.cell).floor().max(0.0) as usize).min(self.nx.saturating_sub(1));
+        let iy = |y: f64| (((y - self.y0) / self.cell).floor().max(0.0) as usize).min(self.ny.saturating_sub(1));
+        (ix(b[0]), iy(b[1]), ix(b[2]), iy(b[3]))
+    }
+
+    /// Kandidaten für das Suchrechteck `b` nach `out` (geleert, aufsteigend, ohne Doppelte).
+    pub fn query(&self, b: [f64; 4], out: &mut Vec<u32>) {
+        out.clear();
+        out.extend_from_slice(&self.always);
+        if self.nx == 0 || !b.iter().all(|v| v.is_finite()) {
+            if self.nx != 0 {
+                // Unsinniges Suchrechteck: alles prüfen lassen.
+                out.extend(self.cells.iter().flatten().copied());
+                out.sort_unstable();
+                out.dedup();
+            }
+            return;
+        }
+        let (gx1, gy1) = (self.x0 + self.cell * self.nx as f64, self.y0 + self.cell * self.ny as f64);
+        if b[2] < self.x0 || b[0] > gx1 || b[3] < self.y0 || b[1] > gy1 {
+            return;
+        }
+        let (i0, j0, i1, j1) = self.span(b);
+        for j in j0..=j1 {
+            for k in i0..=i1 {
+                out.extend_from_slice(&self.cells[j * self.nx + k]);
+            }
+        }
+        if out.len() > 1 {
+            out.sort_unstable();
+            out.dedup();
+        }
+    }
+}
+
 pub fn ring_bbox(pts: &[P]) -> [f64; 4] {
     let mut b = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
     for q in pts {
@@ -426,7 +524,7 @@ pub fn ring_bbox(pts: &[P]) -> [f64; 4] {
 }
 
 /// Schneiden (oder berühren) sich die Strecken a–b und c–d?
-fn segs_cross(a: P, b: P, c: P, d: P) -> bool {
+pub fn segs_cross(a: P, b: P, c: P, d: P) -> bool {
     let o = |p: P, q: P, r: P| (q[0] - p[0]) * (r[1] - p[1]) - (q[1] - p[1]) * (r[0] - p[0]);
     let (d1, d2, d3, d4) = (o(c, d, a), o(c, d, b), o(a, b, c), o(a, b, d));
     if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0)) && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0)) {
@@ -450,7 +548,7 @@ pub fn convex_overlap(a: &[P], b: &[P]) -> bool {
     point_in_ring(b, a[0]) || point_in_ring(a, b[0]) || (0..a.len()).any(|i| (0..b.len()).any(|j| segs_cross(a[i], a[(i + 1) % a.len()], b[j], b[(j + 1) % b.len()])))
 }
 
-fn point_in_ring(ring: &[P], p: P) -> bool {
+pub fn point_in_ring(ring: &[P], p: P) -> bool {
     let mut inside = false;
     let n = ring.len();
     let mut j = n - 1;
@@ -517,6 +615,44 @@ fn seg_rect_dist(a: P, b: P, r: [f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [327] Suchraster: jede Fläche, deren Rechteck das Suchrechteck berührt, wird gemeldet; `cut_out_near` = `cut_out`.
+    #[test]
+    fn box_grid_und_cut_out_near() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut rnd = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let mut o = Obstacles::default();
+        for _ in 0..300 {
+            let (x, y, w, h) = (40.0 * rnd(), 30.0 * rnd(), 0.1 + 2.0 * rnd(), 0.1 + rnd());
+            o.area(vec![[x, y], [x + w, y], [x + w, y + h], [x, y + h]]);
+        }
+        o.area(vec![[1.0, 1.0], [2.0, 1.0]]); // entartet
+        let boxes: Vec<[f64; 4]> = o.areas.iter().map(|r| ring_bbox(r)).collect();
+        let grid = o.area_grid();
+        let mut near = Vec::new();
+        for _ in 0..5000 {
+            let a = [-5.0 + 50.0 * rnd(), -5.0 + 40.0 * rnd()];
+            let b = [a[0] + 6.0 * (rnd() - 0.5), a[1] + 6.0 * (rnd() - 0.5)];
+            let q = [a[0].min(b[0]), a[1].min(b[1]), a[0].max(b[0]), a[1].max(b[1])];
+            grid.query(q, &mut near);
+            for (i, bx) in boxes.iter().enumerate() {
+                if bx[2] >= q[0] && bx[0] <= q[2] && bx[3] >= q[1] && bx[1] <= q[3] {
+                    assert!(near.contains(&(i as u32)), "Fläche {i} fehlt für {q:?}");
+                }
+            }
+            assert!(near.windows(2).all(|w| w[0] < w[1]), "aufsteigend, ohne Doppelte");
+            assert_eq!(o.cut_out(a, b, 0.05), o.cut_out_near(a, b, 0.05, &grid, &mut near));
+        }
+        // Leeres Raster meldet nichts.
+        let empty = Obstacles::default().area_grid();
+        empty.query([0.0, 0.0, 1.0, 1.0], &mut near);
+        assert!(near.is_empty());
+    }
 
     fn v(x: f64, y: f64) -> Vec2 {
         Vec2 { x, y }
