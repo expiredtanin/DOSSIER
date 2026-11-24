@@ -1423,10 +1423,18 @@ fn bubble_shift(ends: &[(Vec2, Vec2)], r: f64, house: &[Vec<Vec2>], dims: &super
     if !(r > 0.0) || (house.is_empty() && dims.is_empty()) || ends.is_empty() || !ends.iter().all(|(e, d)| ok(e) && ok(d)) {
         return 0.0;
     }
+    // [327] Dasselbe Ergebnis wie die volle Rechnung, aber Kanten weiter als der Blasenradius neben dem Punkt und
+    // Hindernisse ohne Berührung des Blasen-Rechtecks werden nicht ausgerechnet (vorher 15–20 ms je Grundriss).
+    let rr = r * 1.1;
     let clear = |c: Vec2| {
         house.iter().all(|ring| {
-            !super::context::inside(c, ring) && (0..ring.len()).all(|k| super::context::seg_dist(c, [ring[k].x, ring[k].y], [ring[(k + 1) % ring.len()].x, ring[(k + 1) % ring.len()].y]) > r * 1.1)
-        }) && (dims.is_empty() || dims.clearance(c, r * 1.1, r * 1.1) > 0.0)
+            !super::context::inside(c, ring)
+                && (0..ring.len()).all(|k| {
+                    let (p, q) = (ring[k], ring[(k + 1) % ring.len()]);
+                    // Liegt der Punkt weiter als `rr` neben dem Rechteck der Kante, ist auch der Abstand grösser.
+                    c.x < p.x.min(q.x) - rr || c.x > p.x.max(q.x) + rr || c.y < p.y.min(q.y) - rr || c.y > p.y.max(q.y) + rr || super::context::seg_dist(c, [p.x, p.y], [q.x, q.y]) > rr
+                })
+        }) && (dims.is_empty() || dims.clearance_capped(c, rr, rr, 1e-12, 0.0) > 0.0)
     };
     let step = r / 4.0;
     // Lauf hinter der Blase: ein Durchmesser in Schritten (die Achse läuft bis zur Blase durch die Ketten, die Blase
