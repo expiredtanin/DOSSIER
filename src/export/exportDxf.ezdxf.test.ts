@@ -72,6 +72,9 @@ describe.skipIf(!hasEzdxf)("DXF-Export gegen ezdxf", { timeout: 60_000 }, () => 
     });
     const plan = generatePlan(world, "eg", new Set(flattenCategories(world.layers).map((l) => l.code)));
     const r = ezdxfRead("demo-haus", buildPlanDxf(plan, world));
+    // [330] Antrittspunkt der Lauflinie: gefülltes 16-Eck einer Treppe, in der DXF als CIRCLE erkannt (arc_fit).
+    const isRunStartMark = (p: Extract<Plan["primitives"][number], { kind: "polygon" }>) => !!p.stairId && p.pts.length >= 12 && p.fill !== "none";
+    expect(r.result!.entities.filter((e) => e.type === "CIRCLE").length).toBeGreaterThanOrEqual(plan.primitives.filter((p) => p.kind === "polygon" && isRunStartMark(p)).length);
     expect(r.result, r.err).not.toBeNull();
     expect(r.result!.errors).toEqual([]);
     expect(r.status).toBe(0);
@@ -80,7 +83,7 @@ describe.skipIf(!hasEzdxf)("DXF-Export gegen ezdxf", { timeout: 60_000 }, () => 
     // Ohne unsichtbare Pick-Bänder und ohne Öffnungs-Polygone (Fensterrahmen liegen im Block, nicht im Modellbereich).
     const polys = plan.primitives.filter(
       (p): p is Extract<Plan["primitives"][number], { kind: "polygon" }> =>
-        p.kind === "polygon" && !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none"),
+        p.kind === "polygon" && !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none") && !isRunStartMark(p),
     );
     const ezPolys = r.result!.entities.filter((e) => e.type === "LWPOLYLINE");
     expect(ezPolys.length).toBe(polys.length);

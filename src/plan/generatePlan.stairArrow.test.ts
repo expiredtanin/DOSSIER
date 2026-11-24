@@ -66,7 +66,7 @@ describe("generatePlan — Treppen-Pfeil", () => {
     expect(arrowLines.length).toBe(2);
     // Keine gefüllte Pfeil-Fläche (Tritt-Polygone tragen fill:"none").
     const filled = prims.filter(
-      (p) => p.kind === "polygon" && p.stairId === "st-1" && p.fill !== "none",
+      (p) => p.kind === "polygon" && p.stairId === "st-1" && p.fill !== "none" && p.pts.length === 3, // ohne Antrittspunkt ([330])
     );
     expect(filled.length).toBe(0);
   });
@@ -76,7 +76,7 @@ describe("generatePlan — Treppen-Pfeil", () => {
       .primitives;
     expect(prims.some((p) => p.kind === "line" && p.cls === "stair-arrow")).toBe(false);
     const filled = prims.filter(
-      (p) => p.kind === "polygon" && p.stairId === "st-1" && p.fill !== "none",
+      (p) => p.kind === "polygon" && p.stairId === "st-1" && p.fill !== "none" && p.pts.length === 3, // ohne Antrittspunkt ([330])
     );
     expect(filled.length).toBe(1);
     expect(filled[0].kind === "polygon" && filled[0].pts.length).toBe(3);

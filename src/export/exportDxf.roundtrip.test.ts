@@ -27,8 +27,9 @@ function flatCounts(plan: Plan, project: Project): Record<string, number> {
 }
 
 /** Polygone, die der Export schreibt: unsichtbare Pick-Bänder (weder Füllung noch Umriss noch Schraffur) entfallen. */
+// [330] Ohne den Antrittspunkt der Lauflinie (gefülltes 16-Eck einer Treppe): die DXF schreibt ihn als CIRCLE (arc_fit).
 const visiblePolys = (polys: Extract<Plan["primitives"][number], { kind: "polygon" }>[]) =>
-  polys.filter((p) => !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none" && p.hatch.kind !== "gradient"));
+  polys.filter((p) => !p.openingId && !(p.stroke === "none" && p.fill === "none" && p.hatch.pattern === "none" && p.hatch.kind !== "gradient") && !(p.stairId && p.pts.length >= 12 && p.fill !== "none"));
 
 describe("DXF-Export (R2018 über acadrust)", () => {
   // 1:50: Wände mit Schichten und Schraffur (ab 1:100 schwarz, [140]).
