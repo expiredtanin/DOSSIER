@@ -1426,6 +1426,18 @@ fn bubble_shift(ends: &[(Vec2, Vec2)], r: f64, house: &[Vec<Vec2>], dims: &super
     // [327] Dasselbe Ergebnis wie die volle Rechnung, aber Kanten weiter als der Blasenradius neben dem Punkt und
     // Hindernisse ohne Berührung des Blasen-Rechtecks werden nicht ausgerechnet (vorher 15–20 ms je Grundriss).
     let rr = r * 1.1;
+    // [327] Nur die Massketten im Suchbereich dieser Seite: die Probepunkte liegen auf den Strahlen ab den Achsenden
+    // (bis 60 m und ein Durchmesser dahinter), ein Hindernis ausserhalb ihres Rechtecks (± Blase) berührt keine Blase.
+    let reach = 60.0 + 5.0 * r;
+    let mut bb = [f64::INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::NEG_INFINITY];
+    for (e, d) in ends {
+        for q in [*e, v(e.x + d.x * reach, e.y + d.y * reach)] {
+            bb = [bb[0].min(q.x), bb[1].min(q.y), bb[2].max(q.x), bb[3].max(q.y)];
+        }
+    }
+    let pad = rr + 1e-6;
+    let near_dims = dims.within([bb[0] - pad, bb[1] - pad, bb[2] + pad, bb[3] + pad]);
+    let dims = &near_dims;
     let clear = |c: Vec2| {
         house.iter().all(|ring| {
             !super::context::inside(c, ring)
