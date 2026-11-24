@@ -734,6 +734,31 @@ pub fn is_loose_fill(c: &crate::model::Component) -> bool {
 /// "timber", "insulation", "screed", "flooring", "plaster", "loose_fill", "metal", "glass", "membrane", "air",
 /// "cladding", "stone", "other". Lose Schüttungen wie [`is_loose_fill`].
 pub fn material_category(c: &crate::model::Component) -> &'static str {
+    // [327] Je Baustoff (Kennung, Standard, Name) gemerkt: die Namenssuche unten lief je Schicht und Abfrage neu
+    // (Ansicht des grossen Projekts: 12 % der Zeit).
+    use std::hash::{Hash, Hasher};
+    type Entry = (String, Option<String>, String, &'static str);
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::HashMap<u64, Entry>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&c.id, &c.standard_id, &c.name).hash(&mut h);
+    let key = h.finish();
+    if let Some(v) = SEEN.with(|m| m.borrow().get(&key).filter(|e| e.0 == c.id && e.1 == c.standard_id && e.2 == c.name).map(|e| e.3)) {
+        return v;
+    }
+    let v = material_category_of(c);
+    SEEN.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 4096 {
+            m.clear();
+        }
+        m.insert(key, (c.id.clone(), c.standard_id.clone(), c.name.clone(), v));
+    });
+    v
+}
+
+fn material_category_of(c: &crate::model::Component) -> &'static str {
     let std = c.standard_id.as_deref().filter(|s| s.starts_with("std-c-")).unwrap_or(c.id.as_str());
     let by_std = match std {
         "std-c-beton" | "std-c-stahlbeton" => Some("concrete"),

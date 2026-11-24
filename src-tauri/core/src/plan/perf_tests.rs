@@ -125,6 +125,27 @@ fn bench159() {
     // 21. Juni, 10 Uhr UTC (Sonnenstudie, [142]).
     let sun = Some(1_782_036_000_000.0);
     let floors: Vec<String> = p.drawing_levels.iter().filter(|l| l.kind == crate::model::DrawingLevelKind::Floor && l.layout_id.is_none()).map(|l| l.id.clone()).collect();
+    // `BENCH_ONLY=elevation|section|3d`: nur dieser Teil, einmal (für `valgrind --tool=callgrind`).
+    if let Ok(only) = std::env::var("BENCH_ONLY") {
+        for l in p.drawing_levels.iter().filter(|l| l.line_points.is_some() && l.layout_id.is_none()) {
+            let text = serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string();
+            let t = Instant::now();
+            match (only.as_str(), l.kind == crate::model::DrawingLevelKind::Section) {
+                ("section", true) => drop(super::super::section::section_plan_buf(&p, &[0.0, 1.0, 0.0, 0.0], &text).unwrap()),
+                ("elevation", false) => drop(super::super::elevation::elevation_plan_buf(&p, &[0.0, 0.0], &text).unwrap()),
+                // Mit Schatten (wie die Ansicht der App mit Schatten an).
+                ("elevation-shadow", false) => drop(super::super::elevation::elevation_plan_buf(&p, &[0.0, 1.0], &text).unwrap()),
+                _ => continue,
+            }
+            println!("{}: {:.1} ms", l.id, ms(t));
+        }
+        if only == "3d" {
+            let t = Instant::now();
+            crate::queries::run(&p, "model3dParts", &[1.0, 2.0, 0.0, 0.0, 0.0], "").unwrap();
+            println!("model3dParts: {:.1} ms", ms(t));
+        }
+        return;
+    }
     println!("== Grundriss (plan_domains_buf, ohne Cache), Mittel über {runs} ==");
     for f in &floors {
         for scale in [100.0, 50.0] {

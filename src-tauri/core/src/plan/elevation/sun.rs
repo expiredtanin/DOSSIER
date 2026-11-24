@@ -114,22 +114,100 @@ pub(super) fn cast(receivers: &[Receiver], casters: &[Vec<[f64; 3]>], l: [f64; 3
         .iter()
         .map(|c| c.iter().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].max(q[0]), b[2].min(q[1]), b[3].max(q[1]), b[4].min(q[2]), b[5].max(q[2])]))
         .collect();
+    let strips = Strips::new(&boxes, l);
+    let mut near: Vec<u32> = Vec::new();
     receivers
         .iter()
         .map(|r| {
-            let out = shade(r, casters, &boxes, l, true);
+            strips.query(bbox_of(&r.region), &mut near);
+            let out = shade(r, casters, &boxes, l, Some(&near));
             #[cfg(test)]
             if COMPARE.load(std::sync::atomic::Ordering::Relaxed) {
-                compare_reference(&out, &shade(r, casters, &boxes, l, false));
+                compare_reference(&out, &shade(r, casters, &boxes, l, None));
             }
             out
         })
         .collect()
 }
 
-/// Schatten eines Empfängers. `prefilter` = [319] Werfer-Stücke vorab aufs Hüllrechteck beschnitten und EIN Boolean;
+/// [327] Werfer nach ihrer Lage quer zum Licht (w = u·l₁ − v·l₀) in Streifen: der Schatten eines Werfers wandert in der
+/// Ansicht nur längs (l₀, l₁), sein w-Bereich ist auf jeder Empfänger-Ebene derselbe. Ein Empfänger prüft so nur die
+/// Werfer seiner Streifen statt alle (grosses Projekt: Tausende Flächen gegen Tausende Werfer).
+struct Strips {
+    l: [f64; 2],
+    w0: f64,
+    step: f64,
+    cells: Vec<Vec<u32>>,
+    /// Werfer ohne endlichen Bereich und alle, wenn das Licht genau in Blickrichtung fällt: immer geprüft.
+    all: bool,
+    n: usize,
+    /// Marken je Werfer für [`Self::query`] (danach wieder leer).
+    seen: std::cell::RefCell<Vec<bool>>,
+}
+
+impl Strips {
+    const N: usize = 512;
+
+    fn range(l: [f64; 2], b: [f64; 4]) -> (f64, f64) {
+        let w = |u: f64, v: f64| u * l[1] - v * l[0];
+        let c = [w(b[0], b[2]), w(b[1], b[2]), w(b[0], b[3]), w(b[1], b[3])];
+        (c.iter().copied().fold(f64::INFINITY, f64::min), c.iter().copied().fold(f64::NEG_INFINITY, f64::max))
+    }
+
+    fn new(boxes: &[[f64; 6]], l: [f64; 3]) -> Strips {
+        let l2 = [l[0], l[1]];
+        let ranges: Vec<Option<(f64, f64)>> = boxes.iter().map(|b| b.iter().all(|x| x.is_finite()).then(|| Self::range(l2, [b[0], b[1], b[2], b[3]]))).collect();
+        let (lo, hi) = ranges.iter().flatten().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), r| (lo.min(r.0), hi.max(r.1)));
+        let mut s = Strips { l: l2, w0: lo, step: (hi - lo) / Self::N as f64, cells: Vec::new(), all: true, n: boxes.len(), seen: std::cell::RefCell::new(vec![false; boxes.len()]) };
+        if !(s.step > 1e-9) || !s.step.is_finite() {
+            return s;
+        }
+        s.all = false;
+        s.cells = vec![Vec::new(); Self::N];
+        for (k, r) in ranges.iter().enumerate() {
+            // Ohne endlichen Quader entfällt der Werfer in `shade` ohnehin.
+            let Some(r) = r else { continue };
+            let (i0, i1) = (s.cell(r.0), s.cell(r.1));
+            for c in &mut s.cells[i0..=i1] {
+                c.push(k as u32);
+            }
+        }
+        s
+    }
+
+    fn cell(&self, w: f64) -> usize {
+        (((w - self.w0) / self.step).floor().max(0.0) as usize).min(Self::N - 1)
+    }
+
+    /// Werfer (aufsteigend), deren w-Bereich den des Rechtecks `rb` (`[u0, u1, v0, v1]`, mit Rand) berühren kann.
+    fn query(&self, rb: [f64; 4], out: &mut Vec<u32>) {
+        out.clear();
+        if self.all || !rb.iter().all(|x| x.is_finite()) {
+            out.extend(0..self.n as u32);
+            return;
+        }
+        let (lo, hi) = Self::range(self.l, [rb[0], rb[1], rb[2], rb[3]]);
+        let pad = 1e-6 * (1.0 + self.l[0].abs() + self.l[1].abs());
+        // Lange Werfer liegen in vielen Streifen: erst über die Marken einmalig machen, dann ordnen.
+        let mut seen = self.seen.borrow_mut();
+        for c in &self.cells[self.cell(lo - pad)..=self.cell(hi + pad)] {
+            for &k in c {
+                if !std::mem::replace(&mut seen[k as usize], true) {
+                    out.push(k);
+                }
+            }
+        }
+        for &k in out.iter() {
+            seen[k as usize] = false;
+        }
+        out.sort_unstable();
+    }
+}
+
+/// Schatten eines Empfängers. `near` = [327] nur diese Werfer (aufsteigend, [`Strips`]); `prefilter` (= `near` gesetzt) = [319] Werfer-Stücke vorab aufs Hüllrechteck beschnitten und EIN Boolean;
 /// ohne (nur als Vergleich in Tests) wie in [316]: alle Stücke vereinigt, dann geschnitten.
-fn shade(r: &Receiver, casters: &[Vec<[f64; 3]>], boxes: &[[f64; 6]], l: [f64; 3], prefilter: bool) -> Vec<Polygon> {
+fn shade(r: &Receiver, casters: &[Vec<[f64; 3]>], boxes: &[[f64; 6]], l: [f64; 3], near: Option<&[u32]>) -> Vec<Polygon> {
+    let prefilter = near.is_some();
     let [a, b, c] = r.plane;
     if r.region.is_empty() || ![a, b, c].iter().all(|x| x.is_finite()) {
         return Vec::new();
@@ -144,7 +222,17 @@ fn shade(r: &Receiver, casters: &[Vec<[f64; 3]>], boxes: &[[f64; 6]], l: [f64; 3
     let hull = convex_hull_of(&r.region, rb);
     let hull_area = hull.as_ref().map_or(0.0, |h| area(h).abs());
     let mut pieces: Vec<Polygon> = Vec::new();
-    for (k, poly) in casters.iter().enumerate() {
+    let all: Vec<u32>;
+    let which: &[u32] = match near {
+        Some(n) => n,
+        None => {
+            all = (0..casters.len() as u32).collect();
+            &all
+        }
+    };
+    for &k in which {
+        let k = k as usize;
+        let poly = &casters[k];
         let bx = boxes[k];
         if poly.len() < 3 || !bx.iter().all(|x| x.is_finite()) {
             continue;

@@ -226,11 +226,29 @@ pub(super) fn material_seams(p: &Project, faces: &[Face]) -> Vec<(Pt, Pt, f64, [
         let b = f.pts.iter().fold([f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY], |b, q| [b[0].min(q[0]), b[1].max(q[0]), b[2].min(q[1]), b[3].max(q[1])]);
         cand.push((fi, key, pl, b));
     }
+    // [327] Paare mit überlappendem Hüllrechteck über eine Sortierung nach u (statt jede Fläche gegen jede), in
+    // der Reihenfolge der vollen Doppelschleife; Material als Nummer statt Textvergleich.
+    let mut ids: HashMap<&str, u32> = HashMap::new();
+    let mat: Vec<u32> = cand.iter().map(|c| { let n = ids.len() as u32; *ids.entry(c.1.as_str()).or_insert(n) }).collect();
+    let mut order: Vec<usize> = (0..cand.len()).collect();
+    order.sort_by(|a, b| cand[*a].3[0].total_cmp(&cand[*b].3[0]));
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    for (n, &i) in order.iter().enumerate() {
+        for &j in &order[n + 1..] {
+            if cand[j].3[0] > cand[i].3[1] + TOL {
+                break;
+            }
+            if mat[i] != mat[j] {
+                pairs.push((i.min(j), i.max(j)));
+            }
+        }
+    }
+    pairs.sort_unstable();
     let mut out = Vec::new();
-    for i in 0..cand.len() {
-        for j in i + 1..cand.len() {
-            let ((fi, ki, pi, bi), (fj, kj, pj, bj)) = (&cand[i], &cand[j]);
-            if ki == kj || bi[0] > bj[1] + TOL || bj[0] > bi[1] + TOL || bi[2] > bj[3] + TOL || bj[2] > bi[3] + TOL {
+    {
+        for (i, j) in pairs {
+            let ((fi, _, pi, bi), (fj, _, pj, bj)) = (&cand[i], &cand[j]);
+            if bi[0] > bj[1] + TOL || bj[0] > bi[1] + TOL || bi[2] > bj[3] + TOL || bj[2] > bi[3] + TOL {
                 continue;
             }
             // Bündig: gleiche Neigung und Tiefe.
