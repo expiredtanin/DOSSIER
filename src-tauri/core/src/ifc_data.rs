@@ -64,6 +64,8 @@ const REC_LAYERS: f64 = 25.0;
 const REC_RAILING: f64 = 26.0;
 /// [281] Geneigte Decke als Netz; Rampe ⇒ `IfcRamp` mit `IfcRampFlight`.
 const REC_CEILING_MESH: f64 = 27.0;
+/// [328] Importiertes Netz eines Gebäudeteils (Archicad-Morph …): Geschoss, id, Name, IFC-Klasse, Netz.
+const REC_PART: f64 = 30.0;
 
 /// Toleranz des Kerns (`wall_bands.rs::EPS`) für „Öffnung trifft Band".
 const BAND_EPS: f64 = 1e-4;
@@ -1075,6 +1077,25 @@ enum Kind {
     Context,
 }
 
+/// [328] IFC-Klassen, die ein importiertes Gebäudeteil beim Export behält (sonst IfcBuildingElementProxy).
+pub const PART_CLASSES: [&str; 10] = ["IfcBuildingElementProxy", "IfcCovering", "IfcFurnishingElement", "IfcFurniture", "IfcSlab", "IfcWall", "IfcColumn", "IfcBeam", "IfcMember", "IfcPlate"];
+
+/// [328] Geschoss (Index in `storey_base`) eines Netzes mit Unterkante `z0`: das höchste, dessen Höhe höchstens 1 cm über
+/// `z0` liegt; tiefer als alle → das unterste; ohne Geschosse −1 (Gebäude).
+fn part_storey(storey_base: &[f64], z0: f64) -> f64 {
+    if storey_base.is_empty() {
+        return -1.0;
+    }
+    let mut best: Option<usize> = None;
+    for (i, b) in storey_base.iter().enumerate() {
+        if *b <= z0 + 0.01 && best.is_none_or(|j| *b > storey_base[j]) {
+            best = Some(i);
+        }
+    }
+    let lowest = (0..storey_base.len()).min_by(|a, b| storey_base[*a].total_cmp(&storey_base[*b])).unwrap_or(0);
+    best.unwrap_or(lowest) as f64
+}
+
 /// eBKP-H-Hauptgruppe zur Bauteilart, oder `None` (Tür, Raum: nicht eindeutig).
 fn ebkph_group(k: Kind) -> Option<(&'static str, &'static str)> {
     match k {
@@ -1179,6 +1200,11 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         p.rooms.iter().flatten().for_each(|x| push(format!("space/{}", x.id), &x.ifc_global_id));
         p.extruded_solids.iter().flatten().for_each(|x| push(format!("extrusion/{}", x.id), &x.ifc_global_id));
         p.openings.iter().flatten().for_each(|x| push(format!("fill/{}", x.id), &x.ifc_global_id));
+        for c in p.context.iter().flatten() {
+            if let ContextObject::ImportedMesh(m) = c {
+                push(format!("part/{}", m.id), &m.ifc_global_id);
+            }
+        }
         let mut seen = std::collections::HashSet::new();
         guids.retain(|(_, g)| seen.insert(g.clone()));
         if !guids.is_empty() {
@@ -2164,6 +2190,41 @@ pub fn ifc_export_data(src: &Project, opt: &IfcOptions) -> Result<Flat, String> 
         w_mesh(&mut f, &positions, &indices, false);
     }
 
+    // ── [328] Importierte Netze auf Gebäudeklassen (Archicad-Morphs, Möbel, Bekleidungen …, alles ausser den
+    // Umgebungsklassen) gehören zum Gebäude: immer dabei, im Geschoss, dessen Höhe die Unterkante des Netzes trägt, mit der
+    // IFC-Klasse der Herkunft (`source` „IFC IfcCovering“; sonst Proxy) und ihrer GlobalId. Vorher fehlten sie im Export ganz. ──
+    for c in p.context.iter().flatten() {
+        let ContextObject::ImportedMesh(m) = c else { continue };
+        if crate::import_context::is_context_class(&m.category_code) {
+            continue;
+        }
+        let n = m.positions.len() / 3;
+        if n < 3 || m.indices.len() < 3 || m.positions.iter().any(|v| !v.is_finite()) {
+            continue;
+        }
+        let tris: Vec<u32> = m
+            .indices
+            .chunks_exact(3)
+            .filter(|t| t.iter().all(|i| i.is_finite() && *i >= 0.0 && (*i as usize) < n) && t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
+            .flat_map(|t| t.iter().map(|i| *i as u32).collect::<Vec<_>>())
+            .collect();
+        if tris.is_empty() {
+            continue;
+        }
+        let z0 = m.positions.iter().skip(2).step_by(3).fold(f64::INFINITY, |a, z| a.min(*z));
+        let structure = part_storey(&storey_base, z0);
+        let base = base_of(structure);
+        let mut positions = m.positions[..n * 3].to_vec();
+        for z in positions.iter_mut().skip(2).step_by(3) {
+            *z -= base;
+        }
+        let class = m.source.as_deref().and_then(|s| s.strip_prefix("IFC ")).map(str::trim).filter(|c| PART_CLASSES.iter().any(|k| k.eq_ignore_ascii_case(c))).unwrap_or("IfcBuildingElementProxy");
+        classified.push((format!("part/{}", m.id), Kind::Context, m.category_code.clone()));
+        let (id, name, cls) = (f.str(&m.id), f.str(if m.name.is_empty() { &m.id } else { &m.name }), f.str(class));
+        f.nums(&[REC_PART, structure, id, name, cls]);
+        w_mesh(&mut f, &positions, &tris, false);
+    }
+
     // ── [259] Kontext (Option): Gelände und Nachbarn am IfcSite, Höhen absolut (Modell-z, ±0.00 = 0) ──
     if opt.context {
         for c in p.context.iter().flatten() {
@@ -2328,8 +2389,9 @@ mod tests {
         text.split('\0').map(String::from).collect()
     }
 
-    /// [259] Kontext nur mit Option: Gelände (jede Klasse) und Netze auf Umgebungsklassen; ein Netz auf einer
-    /// Bauteil-Klasse (z. B. importierte Möblierung) bleibt draussen, ebenso kaputte Dreiecke.
+    /// [259] Kontext nur mit Option: Gelände (jede Klasse) und Netze auf Umgebungsklassen; kaputte Dreiecke fallen weg.
+    /// [328] Ein Netz auf einer Bauteil-Klasse (z. B. importierte Möblierung, Archicad-Morph) ist kein Kontext, geht aber
+    /// immer mit — als Gebäudeteil (`REC_PART`) im Geschoss, mit oder ohne Option.
     #[test]
     fn kontext_nur_mit_option() {
         let mut p = sample();
@@ -2339,13 +2401,21 @@ mod tests {
         let count = |f: &Flat| f.nums.iter().filter(|v| **v == REC_CONTEXT).count();
         let off = ifc_export_data(&p, &IfcOptions::default()).unwrap();
         assert!(!strings(&off).iter().any(|s| s == "nb" || s == "gel"));
+        // Datensatz: REC_PART, Geschoss, id, Name, Klasse (Zahl 30 kommt auch sonst vor: über die Zeichenketten suchen).
+        let parts = |f: &Flat| {
+            let s = strings(f);
+            let at = |k: &str| s.iter().position(|x| x == k).map(|i| i as f64);
+            let (Some(id), Some(name)) = (at("moebel"), at("Netz moebel")) else { return 0 };
+            f.nums.windows(4).filter(|w| w[0] == REC_PART && w[2] == id && w[3] == name).count()
+        };
+        assert_eq!(parts(&off), 1, "Gebäudeteil auch ohne Option");
         let on = ifc_export_data(&p, &IfcOptions { context: true, ..Default::default() }).unwrap();
         let s = strings(&on);
         assert!(count(&on) >= 2);
         for want in ["nb", "Netz nb", "12 Gebäude", "gel", "Gelände"] {
             assert!(s.iter().any(|x| x == want), "fehlt: {want}");
         }
-        assert!(!s.iter().any(|x| x == "moebel"), "Netz auf Bauteil-Klasse ist kein Kontext");
+        assert_eq!(parts(&on), 1, "Netz auf Bauteil-Klasse ist kein Kontext, sondern Gebäudeteil");
         // Datei: Nachbar mit einem gültigen Dreieck (die beiden kaputten fallen weg), Gelände am Grundstück.
         let (nums, text) = from_bytes(&on.to_bytes()).unwrap();
         let ifc = fileio_like_check(&nums, &text);

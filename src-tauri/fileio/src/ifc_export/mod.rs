@@ -126,6 +126,10 @@
 //   FURNITURE   = 29 ([253] Bibliotheksobjekt mit 3D-Netz), structure, id, name, object_type (Katalog-Id), predefined (IfcFurnitureTypeEnum,
 //                 nur IFC4), entourage (0/1), PSETS, MESH (Welt rel. Geschoss-UK): IFC4 IfcFurniture, IFC2x3 IfcFurnishingElement;
 //                 entourage = 1 (Person/Velo/Auto, nur mit Option): IfcBuildingElementProxy, ObjectType „Entourage". GlobalId `furniture/<id>`.
+//   PART        = 30 ([328] importiertes Netz eines Gebäudeteils, z. B. Archicad-Morph), structure, id, name, ifc_class
+//                 (IfcBuildingElementProxy | IfcCovering | IfcFurnishingElement | IfcSlab | IfcWall | IfcColumn | IfcBeam |
+//                 IfcMember | IfcPlate; sonst Proxy), MESH (Welt rel. Geschoss-UK): diese Klasse, PredefinedType NOTDEFINED,
+//                 wo das Schema ihn verlangt. GlobalId aus `part/<id>` (übernommene GlobalId der Import-Datei).
 //   RAILING     = 26 ([279] Geländer), structure, id, name, predefined (GUARDRAIL | HANDRAIL | BALUSTRADE), PSETS, MESH (Prismen,
 //                 Welt rel. Geschoss-UK): IfcRailing mit PredefinedType (IFC4 und IFC2x3). GlobalId aus `railing/<id>`.
 //   CONTEXT     = 24 ([259] Kontext, nur mit Option), kind (0 Netz auf Umgebungsklasse, 1 Gelände), id, name, class
@@ -196,6 +200,40 @@ pub const REC_CEILING_MESH: f64 = 27.0;
 pub const REC_BEAM: f64 = 28.0;
 /// [253] Möbel/Entourage der Bibliothek mit 3D-Netz.
 pub const REC_FURNITURE: f64 = 29.0;
+/// [328] Importiertes Gebäudeteil (Netz) mit seiner IFC-Klasse.
+pub const REC_PART: f64 = 30.0;
+
+/// [328] Was nach den 8 Attributen von IfcElement folgt.
+enum PartTail {
+    /// nichts (IfcFurnishingElement; IFC2x3 IfcWall/IfcColumn/IfcBeam/IfcMember/IfcPlate)
+    None,
+    /// `$` (IfcBuildingElementProxy IFC2x3: CompositionType)
+    Unset,
+    /// `.NOTDEFINED.` (PredefinedType)
+    NotDefined,
+}
+
+/// [328] IFC-Entität eines importierten Gebäudeteils zur Klasse der Herkunft (Gross-/Kleinschreibung egal); unbekannt → Proxy.
+fn part_entity(class: &str, v2: bool) -> (&'static str, PartTail) {
+    let c = class.to_ascii_uppercase();
+    match c.as_str() {
+        // Wie die Bibliotheksmöbel: IFC4 IfcFurniture, IFC2x3 IfcFurnishingElement.
+        "IFCFURNISHINGELEMENT" | "IFCFURNITURE" => if v2 { ("IFCFURNISHINGELEMENT", PartTail::None) } else { ("IFCFURNITURE", PartTail::NotDefined) },
+        "IFCCOVERING" => ("IFCCOVERING", PartTail::NotDefined),
+        "IFCSLAB" => ("IFCSLAB", PartTail::NotDefined),
+        "IFCWALL" | "IFCCOLUMN" | "IFCBEAM" | "IFCMEMBER" | "IFCPLATE" => {
+            let e = match c.as_str() {
+                "IFCWALL" => "IFCWALL",
+                "IFCCOLUMN" => "IFCCOLUMN",
+                "IFCBEAM" => "IFCBEAM",
+                "IFCMEMBER" => "IFCMEMBER",
+                _ => "IFCPLATE",
+            };
+            (e, if v2 { PartTail::None } else { PartTail::NotDefined })
+        }
+        _ => ("IFCBUILDINGELEMENTPROXY", if v2 { PartTail::Unset } else { PartTail::NotDefined }),
+    }
+}
 
 mod format;
 mod reader;
@@ -234,6 +272,7 @@ fn rec_name(code: f64) -> &'static str {
         c if c == REC_COLUMN_PIECES => "COLUMN_PIECES",
         c if c == REC_BEAM => "BEAM",
         c if c == REC_FURNITURE => "FURNITURE",
+        c if c == REC_PART => "PART",
         _ => "?",
     }
 }
@@ -1165,6 +1204,25 @@ pub fn build_ifc(flat: &[f64], strings: &str) -> Result<String, String> {
                 for p in &psets {
                     w.add_pset(p, entity, &key);
                 }
+            }
+            c if c == REC_PART => {
+                let structure = r.structure(n_storeys)?;
+                let id = r.string()?;
+                let name = r.string()?;
+                let class = r.string()?;
+                let mesh = r.mesh()?;
+                let (placement, shape) = w.emit_triangulated_product(&mesh, w.placement_of(structure));
+                let key = format!("part/{id}");
+                let g = w.gid(&key);
+                let head = format!("{g},#{},{},$,$,#{placement},#{shape},$", w.owner_history, ifc_string(&name));
+                let (entity, attrs) = part_entity(&class, w.v2());
+                let entity = w.add(entity, match attrs {
+                    PartTail::None => head,
+                    PartTail::Unset => format!("{head},$"),
+                    PartTail::NotDefined => format!("{head},{}", enum_("NOTDEFINED")),
+                });
+                w.add_to_containment(structure, entity);
+                w.elements.insert(key, entity);
             }
             c if c == REC_RAILING => {
                 let structure = r.structure(n_storeys)?;

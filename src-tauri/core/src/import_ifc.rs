@@ -1174,8 +1174,12 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
         railings.push(v);
     }
 
-    // ── Übrige Bauteile als Kontext-Mesh ──
-    let meshes = ifc_meshes(products, &opts.file_name, opts.group.as_deref().unwrap_or("auto"), [dx, dy], now);
+    // ── Übrige Bauteile als Netz ──
+    let mut meshes = ifc_meshes(products, &opts.file_name, opts.group.as_deref().unwrap_or("auto"), [dx, dy], now);
+    // [328] Netze aus einem Geschoss der Datei (Archicad-Morphs, Möbel, Bekleidungen …) sind Teile des Gebäudes, nicht Umgebung:
+    // Klasse nach ihrer IFC-Klasse (sonst „29 Diverse Bauteile“) — so zählen sie im Plan zum Gebäude und gehen im IFC-Export
+    // mit (Umgebungsklassen nur mit der Option „Kontext“).
+    let need_misc = building_mesh_classes(root, products, &mut meshes);
     let n_meshes = meshes.len();
     let classified = el.walls.iter().filter(|w| w.info.classified).count()
         + el.openings.iter().filter(|o| o.kind != "hole" && o.info.classified).count()
@@ -1216,8 +1220,69 @@ fn elements_ops(root: &Map<String, Value>, meta: &Value, products: &[IfcProduct]
     if n_meshes > 0 {
         ops.extend(context_ops(root, meshes));
     }
+    if need_misc {
+        let misc = json!({"code": MISC_CATEGORY, "name": "Diverse Bauteile", "color": "#1a1a1a", "lw": 0.18, "visible": true, "locked": false});
+        match ops.iter_mut().find_map(|o| match o {
+            Op::SetField { key, value: Some(Value::Array(a)), .. } if key == "layers" => Some(a),
+            _ => None,
+        }) {
+            Some(a) => a.push(misc),
+            None => {
+                let mut layers = root.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+                layers.push(misc);
+                ops.push(Op::SetField { key: "layers".into(), value: Some(Value::Array(layers)), at: None });
+            }
+        }
+    }
     let _ = ctx.root;
     (ops, Value::Object(ctx.summary), n_meshes)
+}
+
+/// [328] Klasse für Gebäudeteile ohne passende Dossier-Klasse (Archicad-Morph als IfcBuildingElementProxy …).
+const MISC_CATEGORY: &str = "29";
+
+/// [328] Dossier-Klasse eines als Netz gebliebenen Gebäudeteils nach seiner IFC-Klasse (wie die Vorlagen).
+fn building_code(ifc_class: &str) -> &'static str {
+    match ifc_class.to_ascii_uppercase().as_str() {
+        "IFCWALL" | "IFCWALLSTANDARDCASE" | "IFCCURTAINWALL" => WALL_CATEGORY,
+        "IFCDOOR" | "IFCWINDOW" => OPENING_CATEGORY,
+        "IFCFURNISHINGELEMENT" | "IFCFURNITURE" | "IFCSYSTEMFURNITUREELEMENT" => "22",
+        "IFCCOLUMN" => COLUMN_CATEGORY,
+        "IFCSLAB" | "IFCPLATE" => CEILING_CATEGORY,
+        "IFCROOF" => ROOF_CATEGORY,
+        "IFCBEAM" | "IFCMEMBER" => BEAM_CATEGORY,
+        "IFCSTAIR" | "IFCSTAIRFLIGHT" | "IFCRAMP" | "IFCRAMPFLIGHT" => STAIR_CATEGORY,
+        "IFCRAILING" => RAILING_CATEGORY,
+        _ => MISC_CATEGORY,
+    }
+}
+
+/// [328] Netze (je Bauteil, mit GlobalId) von Bauteilen in einem Geschoss der Datei auf ihre Gebäudeklasse setzen
+/// ([`building_code`]; fehlt die Klasse im Projekt: [`MISC_CATEGORY`]). Gelände und Teile ohne Geschoss bleiben Umgebung.
+/// `true`, wenn [`MISC_CATEGORY`] gebraucht wird und im Projekt fehlt.
+fn building_mesh_classes(root: &Map<String, Value>, products: &[crate::import_context::IfcProduct], meshes: &mut [Value]) -> bool {
+    let layers = root.get("layers").and_then(Value::as_array).cloned().unwrap_or_default();
+    let existing: HashSet<String> = crate::layers::flatten(&layers).into_iter().filter_map(|c| c.get("code").and_then(Value::as_str).map(str::to_string)).collect();
+    let storey_of: HashMap<&str, &crate::import_context::IfcProduct> = products.iter().filter(|p| !p.global_id.is_empty()).map(|p| (p.global_id.as_str(), p)).collect();
+    let mut need_misc = false;
+    for m in meshes.iter_mut() {
+        if m.get("type").and_then(Value::as_str) != Some("importedMesh") {
+            continue;
+        }
+        let Some(p) = m.get("ifcGlobalId").and_then(Value::as_str).and_then(|g| storey_of.get(g)) else { continue };
+        if p.storey.as_deref().is_none_or(str::is_empty) {
+            continue;
+        }
+        let mut code = building_code(&p.ifc_class);
+        if !existing.contains(code) {
+            code = MISC_CATEGORY;
+        }
+        need_misc |= code == MISC_CATEGORY && !existing.contains(MISC_CATEGORY);
+        if let Some(o) = m.as_object_mut() {
+            o.insert("categoryCode".into(), code.into());
+        }
+    }
+    need_misc
 }
 
 /// Rückschub über die Georeferenz der Datei (IfcMapConversion, [B4]): die Datei liegt lokal, die Karte
@@ -1335,6 +1400,33 @@ pub fn ifc_import(root: &Map<String, Value>, meta_json: &str, positions: &[f64],
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [328] Netze aus einem Geschoss bekommen eine Gebäudeklasse nach ihrer IFC-Klasse; fehlt die Klasse im Projekt,
+    /// „29 Diverse Bauteile“ (wird angelegt); Teile ohne Geschoss bleiben Umgebung.
+    #[test]
+    fn netze_aus_geschoss_auf_gebaeudeklasse() {
+        let pos = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 1.0];
+        let idx = [0.0, 1.0, 2.0];
+        let prod = |gid: &str, class: &str, storey: Option<&str>| crate::import_context::IfcProduct {
+            global_id: gid.into(),
+            ifc_class: class.into(),
+            name: Some(gid.into()),
+            storey: storey.map(String::from),
+            color: None,
+            classifications: vec![],
+            positions: &pos,
+            indices: &idx,
+        };
+        let products = [prod("a", "IfcBuildingElementProxy", Some("EG")), prod("b", "IfcFurnishingElement", Some("EG")), prod("c", "IfcColumn", Some("EG")), prod("d", "IfcBuildingElementProxy", None)];
+        let mut meshes = crate::import_context::ifc_meshes(&products, "m.ifc", "product", [0.0, 0.0], 0.0);
+        let root: Map<String, Value> = serde_json::from_value(json!({"layers": [{"code": "22", "name": "Möbel"}, {"code": "10", "name": "Situation"}]})).unwrap();
+        assert!(building_mesh_classes(&root, &products, &mut meshes), "29 fehlt im Projekt");
+        let codes: Vec<&str> = meshes.iter().map(|m| m["categoryCode"].as_str().unwrap()).collect();
+        // Proxy → 29, Möbel → 22, Stütze (25 fehlt) → 29, ohne Geschoss bleibt 10.
+        assert_eq!(codes, ["29", "22", "29", "10"]);
+        assert_eq!(building_code("IFCWALLSTANDARDCASE"), WALL_CATEGORY);
+        assert_eq!(building_code("IfcRailing"), "41");
+    }
 
     fn added<'a>(ops: &'a [Op], key: &str) -> Vec<&'a Value> {
         let mut out = Vec::new();

@@ -533,6 +533,7 @@ export const de = {
   "objinfo.kind.column": "Stütze",
   "objinfo.kind.roof": "Dach",
   "objinfo.kind.contextObject": "Gelände/Umgebung",
+  "objinfo.kind.buildingMesh": "Importierter Körper",
   "objinfo.kind.sunStudy": "Schatten (Sonnenstand)",
   "objinfo.kind.siteRules": "Baurecht",
   "objinfo.kind.viewShadows": "Schlagschatten (Ansicht)",

@@ -22,7 +22,7 @@ import { useSelectionInfo } from "../state/useSelectionInfo";
 import { lengthFromDisplay, lengthToDisplay, unitsForLevel, xToDisplay, yFromDisplay, yToDisplay } from "../tools/displayUnits";
 import { useMemo, useState } from "react";
 import { t } from "../i18n";
-import { flattenCategories } from "../model/types";
+import { flattenCategories, type LayerCategory } from "../model/types";
 import { Dropdown } from "../ui/Dropdown";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
@@ -64,6 +64,13 @@ function toDeg360(rad: number): number {
  * `showPlacement` = false: ohne Bezugspunkt/Lage und Masse (Breite/Höhe/Drehen) — so zeigt sie das Fenster
  * Objekteinstellungen ([218], Wunsch Maintainer: Platzierung und Masse gehören nur ins Objekt-Info-Panel).
  */
+/** [328] Liegt die Klasse `code` unter „05 Kontext“ (oder ist sie es)? Umgebung statt Gebäude. */
+function isContextCode(layers: readonly LayerCategory[], code: string): boolean {
+  const ctx = layers.find((c) => c.code === "05");
+  if (!ctx) return ["02", "03", "04", "07", "10", "11", "12", "13", "14", "15", "16", "17", "18"].includes(code);
+  return code === "05" || flattenCategories([ctx]).some((c) => c.code === code);
+}
+
 export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: boolean } = {}) {
   const host = usePanelHost();
   const storeProject = useStore((st) => st.project);
@@ -167,7 +174,12 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
       {/* Kopfzeile: Typ + editierbare Klasse (Grafik-Kategorie) + Zeichnungsebene
           (VW-Muster „Klasse"/„Ebene"). */}
       <div className="objinfo-head">
-        <span className="objinfo-kind">{t(`objinfo.kind.${sel.kind}`)}</span>
+        <span className="objinfo-kind">
+          {/* [328] Importiertes Netz auf einer Gebäudeklasse (Archicad-Morph, Möbel …) ist kein Gelände. */}
+          {sel.kind === "contextObject" && sel.contextObject?.objType === "importedMesh" && !isContextCode(storeProject.layers, sel.categoryCode)
+            ? t("objinfo.kind.buildingMesh")
+            : t(`objinfo.kind.${sel.kind}`)}
+        </span>
       </div>
       {sel.categoryCode !== "" && (
         <div className="objinfo-field">

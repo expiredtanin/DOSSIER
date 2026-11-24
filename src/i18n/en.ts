@@ -531,6 +531,7 @@ export const en: Record<TranslationKey, string> = {
   "objinfo.kind.column": "Column",
   "objinfo.kind.roof": "Roof",
   "objinfo.kind.contextObject": "Site element",
+  "objinfo.kind.buildingMesh": "Imported body",
   "objinfo.kind.sunStudy": "Shadow (sun position)",
   "objinfo.kind.siteRules": "Building regulations",
   "objinfo.kind.viewShadows": "Cast shadow (elevation)",
