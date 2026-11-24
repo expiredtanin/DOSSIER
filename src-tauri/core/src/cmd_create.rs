@@ -1003,14 +1003,15 @@ fn column_profile(v: &Value) -> Value {
     }
 }
 
-fn column_ops(v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
+fn column_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     add_op(
         "columns",
         vec![obj(vec![
             ("id", s(&ids.next("column"))),
             ("type", s("column")),
             ("floorId", s(ctx.level)),
-            ("categoryCode", s("50")),
+            // Klasse „25 Stützen“ (vorher fest „50“ = Text in den Vorlagen); fehlt sie, die aktive.
+            ("categoryCode", category_or(p, "25", ctx)),
             ("position", pv(p_of(v, "at"))),
             ("profile", column_profile(v)),
             ("rotation", js_num(0.0)),
@@ -1033,7 +1034,7 @@ fn beam_ops(p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
         ("type", s("beam")),
         ("floorId", s(ctx.level)),
         // Klasse „35“ (Träger), sonst „25“ (Stützen), sonst „50“ (Tragwerk), sonst die aktive (wie beim Erkennen von Stützen).
-        ("categoryCode", if has_category(p, "35") { s("35") } else if has_category(p, "25") { s("25") } else { category_or(p, "50", ctx) }),
+        ("categoryCode", if has_category(p, "35") { s("35") } else { category_or(p, "25", ctx) }),
         ("start", pv(a)),
         ("end", pv(b)),
         ("width", js_num(num("width", 0.25))),
@@ -1328,7 +1329,7 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "stair" => stair_ops(root, p, v, &ctx, ids),
         "opening" => opening_ops(root, p, v, &ctx, ids),
         "roof" => roof_ops(p, v, &ctx, ids),
-        "column" => column_ops(v, &ctx, ids),
+        "column" => column_ops(p, v, &ctx, ids),
         "beam" => beam_ops(p, v, &ctx, ids),
         "tree" => tree_ops(p, v, &ctx, ids),
         "railing" => railing_ops(p, v, &ctx, ids),

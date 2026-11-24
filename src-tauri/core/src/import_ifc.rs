@@ -21,13 +21,14 @@ use std::collections::{HashMap, HashSet};
 const WALL_CATEGORY: &str = "20";
 const OPENING_CATEGORY: &str = "21";
 const CEILING_CATEGORY: &str = "30";
-const COLUMN_CATEGORY: &str = "50";
+/// Klassen wie im Ebenen-Baum der Vorlagen („25 Stützen“, „31 Dächer“, „41 Geländer“; vorher 50 = Text, 35 = Träger, 55 = keine).
+const COLUMN_CATEGORY: &str = "25";
 const ROOM_CATEGORY: &str = "60";
-const ROOF_CATEGORY: &str = "35";
+const ROOF_CATEGORY: &str = "31";
 const STAIR_CATEGORY: &str = "40";
 /// [180] Träger (Extrusionskörper) wie „35 Träger" der Musterprojekte.
 const BEAM_CATEGORY: &str = "35";
-const RAILING_CATEGORY: &str = "55";
+const RAILING_CATEGORY: &str = "41";
 const ROOM_COLOR: &str = "#6b7280";
 const SIA: [&str; 6] = ["HNF", "NNF", "VF", "FF", "KGF", "AGF"];
 const LEVEL_TOL: f64 = 0.005;

@@ -670,7 +670,39 @@ fn prism(s: &Shape) -> Option<(Vec<V2>, Vec<Vec<V2>>)> {
     let outer = outer?;
     // Flächen der Schleifen müssen die Oberseite ergeben.
     let sum = area2(&outer) - holes.iter().map(|h| area2(h)).sum::<f64>();
-    ((sum - a).abs() <= 0.01 * a).then_some((outer, holes))
+    if (sum - a).abs() > 0.01 * a {
+        return None;
+    }
+    // Senkrechte Seiten: jede Ecke liegt im Grundriss in der Oberseite oder auf ihrem Rand. Ein schräg verschobener
+    // Körper (Archicad-Morph „Stütze schräg“: gleiche Deckel, gleiches Volumen) ragt mit mindestens einer Ecke hinaus
+    // (die äusserste in Verschieberichtung) — kein Prisma, bleibt Mesh.
+    let on_rim = |q: V2| std::iter::once(&outer).chain(holes.iter()).any(|l| (0..l.len()).any(|i| seg_dist2(q, l[i], l[(i + 1) % l.len()]) <= RIM_TOL));
+    let within = |q: V2| on_rim(q) || (point_in(q, &outer) && !holes.iter().any(|h| point_in(q, h)));
+    s.plan.iter().all(|q| within(*q)).then_some((outer, holes))
+}
+
+/// Liegt `q` im Ring `r` (gerade-ungerade)?
+fn point_in(q: V2, r: &[V2]) -> bool {
+    let mut inside = false;
+    let n = r.len();
+    for i in 0..n {
+        let (a, b) = (r[i], r[(i + n - 1) % n]);
+        if (a[1] > q[1]) != (b[1] > q[1]) && q[0] < (b[0] - a[0]) * (q[1] - a[1]) / (b[1] - a[1]) + a[0] {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// Abstand (m), bis zu dem eine Ecke als auf dem Rand der Oberseite liegend gilt ([`prism`]).
+const RIM_TOL: f64 = 2e-3;
+
+/// Abstand des Punkts `q` von der Strecke a–b.
+fn seg_dist2(q: V2, a: V2, b: V2) -> f64 {
+    let (ab, aq) = (sub2(b, a), sub2(q, a));
+    let l = dot2(ab, ab);
+    let t = if l > 0.0 { (dot2(aq, ab) / l).clamp(0.0, 1.0) } else { 0.0 };
+    len2(sub2(aq, [ab[0] * t, ab[1] * t]))
 }
 
 /// [B4] Ebene, geneigte Platte (Rampe): Oberseite und Unterseite auf parallelen Ebenen `z = gx·x + gy·y + c`
@@ -2966,6 +2998,28 @@ ENDSEC;\nEND-ISO-10303-21;\n"
         assert_eq!(s.slabs.len(), 1, "{:?}", s.kept_reasons);
         assert_eq!(s.slabs[0].outline.len(), 4);
         assert!(close(area2(&s.slabs[0].outline), 8.0));
+    }
+
+    /// Archicad-Morph als Stütze, schräg verschoben (gleiche Deckel, gleiches Volumen wie ein Prisma): bleibt Mesh statt
+    /// einer senkrechten Stütze in der Mitte; dieselbe Stütze senkrecht wird erkannt.
+    #[test]
+    fn schraege_stuetze_bleibt_mesh() {
+        let quad = |dx: f64| -> Vec<Vec<[f64; 3]>> {
+            let b = [[0.0, 0.0], [0.3, 0.0], [0.3, 0.3], [0.0, 0.3]];
+            let lo: Vec<[f64; 3]> = b.iter().map(|p| [p[0], p[1], 0.0]).collect();
+            let hi: Vec<[f64; 3]> = b.iter().map(|p| [p[0] + dx, p[1], 2.5]).collect();
+            let mut f = vec![lo.iter().rev().copied().collect::<Vec<_>>(), hi.clone()];
+            for i in 0..4 {
+                let j = (i + 1) % 4;
+                f.push(vec![lo[i], lo[j], hi[j], hi[i]]);
+            }
+            f
+        };
+        let (_, s) = sem(&file(METRE, &brep_product(100, "IFCCOLUMN", &quad(0.5), "$")));
+        assert!(s.columns.is_empty(), "schräg: keine Stütze");
+        assert_eq!(s.kept_reasons.get("IfcColumn").and_then(|m| m.get("notPrism")).copied(), Some(1), "{:?}", s.kept_reasons);
+        let (_, s) = sem(&file(METRE, &brep_product(100, "IFCCOLUMN", &quad(0.0), "$")));
+        assert_eq!(s.columns.len(), 1, "senkrecht: Stütze {:?}", s.kept_reasons);
     }
 
     /// Freie Beispieldateien (ArchiCAD/Vectorworks-Exporte …), nur wenn `DOSSIER_IFC_ELEMENT_SAMPLES` auf

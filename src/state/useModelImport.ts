@@ -4,7 +4,7 @@
 // passenden Import. Aufgerufen von `App.tsx` nach `useProjectFileActions` (braucht `openImportForFile`).
 
 import { useState, type RefObject } from "react";
-import type { ContextObject, Wall } from "../model/types";
+import type { ContextObject, Vec2 } from "../model/types";
 import { addedItems } from "../core";
 import { readStepFlat } from "../engine/truckSolid";
 import { formatIfcElementsSummary, formatIfcReport, readIfcFlat, type IfcElementsSummary } from "../io/ifcImport";
@@ -17,6 +17,28 @@ import { getState, type RootState } from "./appStore";
 import { requestMeshImport } from "./meshImportStore";
 import { requestPointCloudImport } from "./pointCloudStore";
 import type { useProjectActions } from "./useProjectActions";
+
+/** Grundriss-Punkte der mit `ops` importierten Bauteile (Wände, Decken, Dächer, Räume, Stützen, Träger, Treppen …) und
+ *  Kontext-Netze (x, y jeder Ecke) — für das Einpassen des Ausschnitts nach dem IFC-Import „Als Bauteile“. */
+export function importedElementPoints(ops: Parameters<typeof addedItems>[0]): Vec2[] {
+  const out: Vec2[] = [];
+  const isPt = (v: unknown): v is Vec2 => !!v && typeof (v as Vec2).x === "number" && typeof (v as Vec2).y === "number" && Number.isFinite((v as Vec2).x) && Number.isFinite((v as Vec2).y);
+  for (const key of ["walls", "ceilings", "roofs", "rooms", "columns", "beams", "stairs", "railings", "extrudedSolids"] as const) {
+    for (const it of addedItems(ops, key) as Record<string, unknown>[]) {
+      for (const f of ["start", "end", "position"]) if (isPt(it[f])) out.push(it[f]);
+      for (const f of ["outline", "boundary", "points"]) {
+        const list = it[f];
+        if (Array.isArray(list)) for (const q of list) if (isPt(q)) out.push(q);
+      }
+    }
+  }
+  for (const o of addedItems(ops, "context") as ContextObject[]) {
+    if (o.type !== "importedMesh" && o.type !== "terrainMesh") continue;
+    const pos = o.positions;
+    for (let i = 0; i + 1 < pos.length; i += 3) if (Number.isFinite(pos[i]) && Number.isFinite(pos[i + 1])) out.push({ x: pos[i], y: pos[i + 1] });
+  }
+  return out;
+}
 
 export function useModelImport(opts: {
   notify: RootState["notify"];
@@ -43,7 +65,9 @@ export function useModelImport(opts: {
         if (!r) return;
         const report = r.report;
         if (elements && r.summary) {
-          const bounds = addedItems(r.ops, "walls").flatMap((w) => [(w as Wall).start, (w as Wall).end]);
+          // Ausschnitt auf alles Importierte: Bauteile UND die als Mesh gebliebenen Teile (Archicad-Morphs …). Vorher nur
+          // auf die Wände — eine Datei mit wenig Wänden zeigte die Morphs winzig oder gar nicht (Rückmeldung 24.11.).
+          const bounds = importedElementPoints(r.ops);
           if (bounds.length) planViewRef.current?.fitBounds(bounds);
           const s = r.summary;
           const empty = s.walls + s.ceilings + s.columns + s.rooms + s.meshes === 0;

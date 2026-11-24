@@ -39,7 +39,7 @@ export type Beam = {
   type: "beam";
   /** Zugehörige Zeichnungsebene (Geschoss). */
   floorId: string;
-  /** Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk. */
+  /** Grafik-Kategorie (Ebene), z. B. "35" (Träger). */
   categoryCode: string;
   /**
    * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
@@ -390,7 +390,7 @@ export type Column = {
   type: "column";
   /** Zugehörige Zeichnungsebene (Geschoss). */
   floorId: string;
-  /** Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk. */
+  /** Grafik-Kategorie (Ebene), z. B. "25" (Stützen). */
   categoryCode: string;
   /**
    * [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
@@ -3588,7 +3588,7 @@ export type Railing = {
   type: "railing";
   /** Zugehörige Zeichnungsebene (Geschoss). */
   floorId: string;
-  /** Grafik-Kategorie (Ebene), Vorgabe "55" (Geländer). */
+  /** Grafik-Kategorie (Ebene), Vorgabe "41" (Geländer). */
   categoryCode: string;
   /** IFC-GlobalId des Quell-Bauteils (IFC-Import/Rundreise). */
   ifcGlobalId?: string;

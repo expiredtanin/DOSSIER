@@ -5436,7 +5436,7 @@ pub struct Column {
     /// Zugehörige Zeichnungsebene (Geschoss).
     #[serde(rename = "floorId")]
     pub floor_id: String,
-    /// Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk.
+    /// Grafik-Kategorie (Ebene), z. B. "25" (Stützen).
     #[serde(rename = "categoryCode")]
     pub category_code: String,
     /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
@@ -5552,7 +5552,7 @@ pub struct Beam {
     /// Zugehörige Zeichnungsebene (Geschoss).
     #[serde(rename = "floorId")]
     pub floor_id: String,
-    /// Grafik-Kategorie (Ebene), z. B. "50" für Tragwerk.
+    /// Grafik-Kategorie (Ebene), z. B. "35" (Träger).
     #[serde(rename = "categoryCode")]
     pub category_code: String,
     /// [201] IFC-GlobalId des Quell-Bauteils (IFC-Import); der IFC-Export schreibt sie zurück, damit
@@ -5845,7 +5845,7 @@ pub struct Railing {
     /// Zugehörige Zeichnungsebene (Geschoss).
     #[serde(rename = "floorId")]
     pub floor_id: String,
-    /// Grafik-Kategorie (Ebene), Vorgabe "55" (Geländer).
+    /// Grafik-Kategorie (Ebene), Vorgabe "41" (Geländer).
     #[serde(rename = "categoryCode")]
     pub category_code: String,
     /// IFC-GlobalId des Quell-Bauteils (IFC-Import/Rundreise).
