@@ -125,7 +125,7 @@ fn bench159() {
     // 21. Juni, 10 Uhr UTC (Sonnenstudie, [142]).
     let sun = Some(1_782_036_000_000.0);
     let floors: Vec<String> = p.drawing_levels.iter().filter(|l| l.kind == crate::model::DrawingLevelKind::Floor && l.layout_id.is_none()).map(|l| l.id.clone()).collect();
-    // `BENCH_ONLY=elevation|section|3d`: nur dieser Teil, einmal (für `valgrind --tool=callgrind`).
+    // `BENCH_ONLY=elevation|elevation-shadow|section|3d|ifc`: nur dieser Teil, einmal (für `valgrind --tool=callgrind`).
     if let Ok(only) = std::env::var("BENCH_ONLY") {
         for l in p.drawing_levels.iter().filter(|l| l.line_points.is_some() && l.layout_id.is_none()) {
             let text = serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string();
@@ -138,6 +138,11 @@ fn bench159() {
                 _ => continue,
             }
             println!("{}: {:.1} ms", l.id, ms(t));
+        }
+        if only == "ifc" {
+            let t = Instant::now();
+            let n = crate::queries::run_bin(&p, "ifcExportData", &[0.0, 0.0, 0.0, 0.0], "").unwrap().len();
+            println!("ifcExportData: {:.1} ms ({n} Bytes)", ms(t));
         }
         if only == "3d" {
             let t = Instant::now();

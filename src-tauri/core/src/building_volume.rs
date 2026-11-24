@@ -121,6 +121,56 @@ fn area_prism(area: &[Polygon], z0: f64, z1: f64) -> Result<Solid, String> {
     Ok(acc)
 }
 
+/// [327] Vereinigung von Körpern, die meist übereinander liegen (Geschosse): Teile, deren Höhenbereiche sich nicht
+/// überlappen, bleiben einzeln — das Volumen der Vereinigung ist ihre Summe, ohne Boolean (zwei Geschoss-Prismen mit
+/// je 300 Ecken zu vereinen kostete 40–130 ms, und das je Geschoss doppelt). Nur was sich in der Höhe überlappt
+/// (Dachraum in das Geschoss darüber), wird wirklich vereinigt.
+#[derive(Default)]
+struct Stack {
+    /// (Körper, z von, z bis, Volumen)
+    parts: Vec<(Solid, f64, f64, f64)>,
+}
+
+impl Stack {
+    /// Körper dazu; Ergebnis: Zuwachs des Volumens der Vereinigung.
+    fn add(&mut self, s: Solid) -> Result<f64, String> {
+        let Some((lo, hi)) = s.to_mesh_raw().bounds() else { return Ok(0.0) };
+        let (mut merged, mut z, mut old) = (s, (lo[2], hi[2]), 0.0);
+        let mut i = 0;
+        while i < self.parts.len() {
+            let q = &self.parts[i];
+            if q.1 < z.1 - 1e-9 && q.2 > z.0 + 1e-9 {
+                let q = self.parts.remove(i);
+                merged = q.0.union(&merged)?;
+                z = (z.0.min(q.1), z.1.max(q.2));
+                old += q.3;
+                // Der gewachsene Bereich kann frühere Teile neu berühren.
+                i = 0;
+            } else {
+                i += 1;
+            }
+        }
+        let v = merged.volume();
+        self.parts.push((merged, z.0, z.1, v));
+        Ok(v - old)
+    }
+
+    /// Volumen über ±0.00.
+    fn above_zero(&self) -> Result<f64, String> {
+        let mut sum = 0.0;
+        for (s, z0, z1, v) in &self.parts {
+            if *z0 >= 0.0 {
+                sum += v;
+            } else if *z1 > 0.0 {
+                let Some((lo, hi)) = s.to_mesh_raw().bounds() else { continue };
+                let ring = [[lo[0] - 1.0, lo[1] - 1.0], [hi[0] + 1.0, lo[1] - 1.0], [hi[0] + 1.0, hi[1] + 1.0], [lo[0] - 1.0, hi[1] + 1.0]];
+                sum += s.intersection(&Solid::new(&Mesh::prism(&ring, 0.0, hi[2] + 1.0))?)?.volume();
+            }
+        }
+        Ok(sum)
+    }
+}
+
 /// Ein Dach: Geschoss-Index, Umriss ∩ Grundriss, Raum unter der Oberkante (bis tief hinunter), Höhen.
 struct RoofIn {
     level: usize,
@@ -219,8 +269,7 @@ fn compute(p: &Project, floors: &[&DrawingLevel], fps: &[Vec<Polygon>]) -> Resul
     for r in &roofs {
         hull = hull.union(&r.under)?;
     }
-    let (mut env, mut boxes) = (Solid::empty(), Solid::empty());
-    let (mut v_env, mut v_box) = (0.0, 0.0);
+    let (mut env, mut boxes) = (Stack::default(), Stack::default());
     for i in 0..n {
         let (z0, z1) = (base(floors[i]), base(floors[i]) + height(floors[i]));
         let bx = area_prism(&fps[i], z0, z1)?;
@@ -237,21 +286,10 @@ fn compute(p: &Project, floors: &[&DrawingLevel], fps: &[Vec<Polygon>]) -> Resul
                 e = e.union(&r.under.intersection(&area_prism(&r.area, z0, r.z_hi)?)?)?;
             }
         }
-        env = env.union(&e)?;
-        boxes = boxes.union(&bx)?;
-        let (ve, vb) = (env.volume(), boxes.volume());
-        out.per_level[i] = (ve - v_env) - (vb - v_box);
-        v_env = ve;
-        v_box = vb;
+        out.per_level[i] = env.add(e)? - boxes.add(bx)?;
     }
     // Anteil über ±0.00.
-    if let Some((lo, hi)) = env.to_mesh_raw().bounds() {
-        if hi[2] > 0.0 {
-            let ring = [[lo[0] - 1.0, lo[1] - 1.0], [hi[0] + 1.0, lo[1] - 1.0], [hi[0] + 1.0, hi[1] + 1.0], [lo[0] - 1.0, hi[1] + 1.0]];
-            let above = Solid::new(&Mesh::prism(&ring, 0.0, hi[2] + 1.0))?;
-            out.above_ground = env.intersection(&above)?.volume() - boxes.intersection(&above)?.volume();
-        }
-    }
+    out.above_ground = env.above_zero()? - boxes.above_zero()?;
     if out.per_level.iter().any(|v| !v.is_finite()) || !out.above_ground.is_finite() {
         return Err("Volumen nicht endlich".into());
     }
@@ -266,6 +304,27 @@ mod tests {
     /// m³: Die Grundrisse laufen über i_overlay (Ganzzahlraster ≈ Ausdehnung/2³⁰), die Volumen daher auf
     /// ≈ 1e-6 genau.
     const TOL: f64 = 1e-4;
+
+    /// [327] `Stack`: Zuwachs je Körper und Anteil über ±0.00 wie bei der vollen Vereinigung — gestapelt (berührend),
+    /// überlappend (Dachraum ins Geschoss darüber) und ein Teil, das zwei getrennte verbindet.
+    #[test]
+    fn stack_wie_volle_vereinigung() {
+        use super::Stack;
+        use crate::solid_bool::{Mesh, Solid};
+        let bx = |x0: f64, x1: f64, z0: f64, z1: f64| Solid::new(&Mesh::prism(&[[x0, 0.0], [x1, 0.0], [x1, 4.0], [x0, 4.0]], z0, z1)).unwrap();
+        let parts = [bx(0.0, 5.0, -2.7, 0.0), bx(0.0, 5.0, 0.0, 2.9), bx(1.0, 6.0, 5.0, 8.0), bx(2.0, 4.0, 2.0, 6.0), bx(0.0, 1.0, 8.0, 9.0)];
+        let (mut stack, mut full, mut v) = (Stack::default(), Solid::empty(), 0.0);
+        for q in &parts {
+            full = full.union(q).unwrap();
+            let d = stack.add(q.clone()).unwrap();
+            assert!((d - (full.volume() - v)).abs() < 1e-9, "Zuwachs {d} statt {}", full.volume() - v);
+            v = full.volume();
+        }
+        // Unten ein Teil für sich, oben alles über die Brücke 2.0..6.0 verbunden, zuoberst wieder eines für sich.
+        assert_eq!(stack.parts.len(), 3);
+        let above = Solid::new(&Mesh::prism(&[[-1.0, -1.0], [7.0, -1.0], [7.0, 5.0], [-1.0, 5.0]], 0.0, 10.0)).unwrap();
+        assert!((stack.above_zero().unwrap() - full.intersection(&above).unwrap().volume()).abs() < 1e-9);
+    }
 
     fn close(a: f64, b: f64, tol: f64) -> bool {
         (a - b).abs() < tol
