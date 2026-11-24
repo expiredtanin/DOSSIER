@@ -337,12 +337,13 @@ fn lauflinie_versatz_und_antrittspunkt() {
     };
     let (l0, n0) = run(&p);
     assert!(l0 > 0.0);
-    let mut q = with_mv(p.clone(), serde_json::json!({"stairs": {"runStartMm": 2, "runEndMm": 3, "startMark": true}}));
+    // [328] Antrittspunkt ist Vorgabe (SIA 400); die Stufe schaltet ihn ab.
+    let mut q = with_mv(p.clone(), serde_json::json!({"stairs": {"runStartMm": 2, "runEndMm": 3, "startMark": false}}));
     set_level_mv(&mut q, "eg", "mv");
     let (l1, n1) = run(&q);
     // 2 + 3 mm Papier bei 1:50 = 0.25 m kürzer.
     assert!((l0 - l1 - 0.25).abs() < 1e-6, "Versatz ({l0} → {l1})");
-    assert_eq!(n1, n0 + 1, "Antrittspunkt");
+    assert_eq!(n1 + 1, n0, "Antrittspunkt");
 }
 
 /// Sample mit dem Standard-Steildach (Holz gedämmt) auf RF1 und den Standard-Baustoffen.

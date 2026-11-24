@@ -15,6 +15,7 @@ import {
   resolveCombo,
   SHORTCUT_DEFS,
   type ShortcutOverrides,
+  toolShortcutLabel,
 } from "./keyboardShortcuts";
 
 // Reines Objekt statt `new KeyboardEvent(...)` — Letzteres braucht ein DOM
@@ -221,5 +222,15 @@ describe("[170] Datei-Kürzel ausserhalb von Tauri (Browser/Electron-Linux)", ()
   it("kollidiert mit keinem belegbaren Kürzel", () => {
     const combos = SHORTCUT_DEFS.map((d) => d.defaultCombo);
     for (const c of ["mod+s", "mod+shift+s", "mod+o"]) expect(combos).not.toContain(c);
+  });
+});
+
+describe("toolShortcutLabel", () => {
+  // [287] (12) Werkzeug-Tooltips mit Kürzel; Übersteuerung gilt, Werkzeug ohne Kürzel `null`.
+  it("zeigt das wirksame Kürzel", () => {
+    const def = toolShortcutLabel("wall", {});
+    expect(def).toBeTruthy();
+    expect(toolShortcutLabel("wall", { toolWall: "shift+w" })).toMatch(/W$/);
+    expect(toolShortcutLabel("gibts-nicht", {})).toBeNull();
   });
 });

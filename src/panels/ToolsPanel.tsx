@@ -16,6 +16,7 @@ import { t } from "../i18n";
 import { usePanelHostAction, usePanelHostSelect } from "./host";
 import type { ToolId } from "./host";
 import { toolInfo } from "../tools/tools";
+import { toolShortcutLabel } from "../state/keyboardShortcuts";
 import { getCommand } from "../commands/registry";
 import { CommandIcon } from "../ui/ribbon/CommandIcon";
 
@@ -422,13 +423,16 @@ export const ToolsPanel = memo(function ToolsPanel() {
     const active = host.activeTool === id;
     const disabled = !!tool.floorOnly && !host.toolsEnabled;
     const label = t(tool.labelKey);
-    const title = disabled ? t("tool.floorOnlyDisabled") : t(tool.hintKey);
+    // [287] (12) Kürzel im Tooltip („Linie (L)“), damit man es beim Überfahren lernt.
+    const key = toolShortcutLabel(id);
+    const withKey = (s: string) => (key ? `${s} (${key})` : s);
+    const title = disabled ? t("tool.floorOnlyDisabled") : withKey(t(tool.hintKey));
     return (
       <button
         key={id}
         type="button"
         className={"tp-item" + (active ? " active" : "") + (disabled ? " disabled" : "")}
-        title={view === "icons" ? label : title}
+        title={view === "icons" ? withKey(label) : title}
         disabled={disabled}
         onClick={() => onSelectTool(id)}
       >

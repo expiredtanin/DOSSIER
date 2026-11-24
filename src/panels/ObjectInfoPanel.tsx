@@ -27,6 +27,7 @@ import { Dropdown } from "../ui/Dropdown";
 import { usePanelHost } from "./host";
 import { useStore } from "../state/appStore";
 import { excavationQuantities } from "../core";
+import { selectionCounts } from "../state/selectionCategory";
 import { ContextObjectProps } from "./ContextObjectProps";
 import { SunStudySection } from "./SunStudySection";
 import { SiteRulesSection } from "./SiteRulesSection";
@@ -60,10 +61,6 @@ function toDeg360(rad: number): number {
 }
 
 
-/**
- * `showPlacement` = false: ohne Bezugspunkt/Lage und Masse (Breite/Höhe/Drehen) — so zeigt sie das Fenster
- * Objekteinstellungen ([218], Wunsch Maintainer: Platzierung und Masse gehören nur ins Objekt-Info-Panel).
- */
 /** [328] Liegt die Klasse `code` unter „05 Kontext“ (oder ist sie es)? Umgebung statt Gebäude. */
 function isContextCode(layers: readonly LayerCategory[], code: string): boolean {
   const ctx = layers.find((c) => c.code === "05");
@@ -71,12 +68,17 @@ function isContextCode(layers: readonly LayerCategory[], code: string): boolean 
   return code === "05" || flattenCategories([ctx]).some((c) => c.code === code);
 }
 
+/**
+ * `showPlacement` = false: ohne Bezugspunkt/Lage und Masse (Breite/Höhe/Drehen) — so zeigt sie das Fenster
+ * Objekteinstellungen ([218], Wunsch Maintainer: Platzierung und Masse gehören nur ins Objekt-Info-Panel).
+ */
 export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: boolean } = {}) {
   const host = usePanelHost();
   const storeProject = useStore((st) => st.project);
   // [121] Abschnitts-Rahmen ohne eigene Komponente (kein Render je Abschnitt bei Inhaltsänderung).
   const gst = useInfoGroupState();
   const sel = useSelectionInfo();
+  const allSel = useStore((s) => s.selection);
 
   // Gewählter Bezugspunkt — Default Mitte (Vectorworks-Standardanker beim
   // Skalieren). Bleibt erhalten, solange das Panel montiert ist.
@@ -131,6 +133,9 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
     );
   }
 
+  const counts = selectionCounts(allSel);
+  const total = counts.reduce((n, x) => n + x.n, 0);
+  const multi = total > 1 ? { total, list: counts.map((x) => `${x.n} ${t(`objinfo.multi.kind.${x.kind}${x.n === 1 ? ".one" : ""}`)}`).join(", ") } : null;
   const { bbox } = sel;
   const elementDims = elementDimensions(sel);
   const width = bbox.maxX - bbox.minX;
@@ -174,6 +179,12 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
       {/* Kopfzeile: Typ + editierbare Klasse (Grafik-Kategorie) + Zeichnungsebene
           (VW-Muster „Klasse"/„Ebene"). */}
       <div className="objinfo-head">
+        {multi && (
+          // [287] (6) Mehrfachauswahl: wie viele und welche; die Felder zeigen das erste Element, die Klasse gilt für alle.
+          <div className="objinfo-multi" data-testid="objinfo-multi" title={t("objinfo.multi.hint")}>
+            {t("objinfo.multi", { n: multi.total, list: multi.list })}
+          </div>
+        )}
         <span className="objinfo-kind">
           {/* [328] Importiertes Netz auf einer Gebäudeklasse (Archicad-Morph, Möbel …) ist kein Gelände. */}
           {sel.kind === "contextObject" && sel.contextObject?.objType === "importedMesh" && !isContextCode(storeProject.layers, sel.categoryCode)

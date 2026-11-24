@@ -2553,7 +2553,7 @@ pub struct ModelViewStairs {
     #[serde(rename = "runEndMm", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub run_end_mm: Option<f64>,
-    /// Antrittspunkt am Anfang der Lauflinie (Basis: nein).
+    /// Antrittspunkt am Anfang der Lauflinie (Basis: ja, SIA 400).
     #[serde(rename = "startMark", default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub start_mark: Option<bool>,

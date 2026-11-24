@@ -6,6 +6,7 @@
 import { applyFillMode } from "../fillMode";
 import { cmdMutation, opsMutation, patchItem, patchItems } from "../../core";
 import { getState } from "../appStore";
+import { categoryOpsForSelection, selectionCounts } from "../selectionCategory";
 import { STYLE_KINDS } from "../mixedValues";
 import { resolvePenColor } from "../../model/penSets";
 import type { TransformSelection } from "../../tools/transform";
@@ -355,6 +356,12 @@ export function buildSelectionStyleHost(c: FlatHostOpts) {
     // (VW-Muster „Klasse"/„Ebene"). Je Elementart der passende Store-Weg.
     onSetSelectionCategory: (code) => {
       if (!selection || !code) return;
+      // [287] (6) Mehrfachauswahl: Klasse für alle gewählten Elemente, ein Undo-Schritt (Vectorworks-Muster).
+      const all = getState().selection;
+      if (selectionCounts(all).reduce((n, x) => n + x.n, 0) > 1) {
+        applyChange((p) => categoryOpsForSelection(p, all, code));
+        return;
+      }
       const id = selection.id;
       switch (selection.kind) {
         case "wall": updateWall(id, { categoryCode: code }); break;

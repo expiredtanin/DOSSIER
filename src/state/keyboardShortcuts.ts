@@ -422,3 +422,24 @@ export function formatCombo(combo: string, mac: boolean = isMacPlatform()): stri
   segs.push(keyLabel);
   return segs.join(mac ? "" : "+");
 }
+
+/** Reihenfolge/Zuordnung Ziffer→Werkzeug — Ids der rebindbaren Kombination in `keyboardShortcuts.ts`. */
+export const TOOL_SHORTCUT_IDS: { id: ShortcutId; tool: string }[] = [
+  { id: "toolText", tool: "text" },
+  { id: "toolLine", tool: "line" },
+  { id: "toolCircle", tool: "circle" },
+  { id: "toolRect", tool: "rect" },
+  { id: "toolPolyline", tool: "polyline" },
+  { id: "toolWall", tool: "wall" },
+  { id: "toolCeiling", tool: "ceiling" },
+  { id: "toolWindow", tool: "window" },
+  { id: "toolDoor", tool: "door" },
+  { id: "toolRoom", tool: "room" },
+];
+
+/** [287] (12) Tastenkürzel eines Werkzeugs zur Anzeige (Tooltip „Linie (L)“), mit Übersteuerung; ohne Kürzel `null`. */
+export function toolShortcutLabel(tool: string, overrides: ShortcutOverrides = loadShortcutOverrides()): string | null {
+  const m = TOOL_SHORTCUT_IDS.find((x) => x.tool === tool);
+  const combo = m ? resolveCombo(m.id, overrides) : "";
+  return combo ? formatCombo(combo) : null;
+}

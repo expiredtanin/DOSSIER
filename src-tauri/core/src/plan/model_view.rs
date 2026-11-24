@@ -543,7 +543,8 @@ pub fn resolve(mv: Option<&ModelViewOption>, detail: Detail, scale: f64) -> Opti
             section_beyond: s.and_then(|s| s.section_beyond).unwrap_or(true),
             run_start_mm: s.and_then(|s| s.run_start_mm).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0),
             run_end_mm: s.and_then(|s| s.run_end_mm).filter(|v| v.is_finite() && *v >= 0.0).unwrap_or(0.0),
-            start_mark: s.and_then(|s| s.start_mark).unwrap_or(false),
+            // [328] SIA 400 / DIN 1356: Lauflinie mit Punkt am Antritt und Pfeil am Austritt — Vorgabe an (vorher aus).
+            start_mark: s.and_then(|s| s.start_mark).unwrap_or(true),
             step_numbers: s.and_then(|s| s.step_numbers).unwrap_or(false),
         },
         wall: WallOpts {

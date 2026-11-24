@@ -5507,6 +5507,7 @@ body {
 }
 .objinfo-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
@@ -5514,6 +5515,13 @@ body {
 .objinfo-kind {
   font-weight: 600;
   color: var(--label);
+}
+/* [287] (6) Mehrfachauswahl: Zeile über der Art, ganze Breite. */
+.objinfo-multi {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0 4px;
 }
 .objinfo-cat {
   color: var(--muted);

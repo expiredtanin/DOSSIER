@@ -2755,7 +2755,7 @@ export type ModelViewStairs = {
   runStartMm?: number;
   /** Versatz der Lauflinie am Ende in Papier-mm (Basis 0: bis zur Austrittskante). */
   runEndMm?: number;
-  /** Antrittspunkt am Anfang der Lauflinie (Basis: nein). */
+  /** Antrittspunkt am Anfang der Lauflinie (Basis: ja, SIA 400). */
   startMark?: boolean;
   /** [173] Stufennummern im Grundriss (Basis: nein). */
   stepNumbers?: boolean;

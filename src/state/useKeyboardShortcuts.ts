@@ -32,7 +32,7 @@ import {
 } from "../editors/elementClipboard";
 import type { ElementClipboard, ElementSelectionIds, PastedIds } from "../editors/elementClipboard";
 import { parseClipboardText, serializeClipboardText } from "../editors/elementClipboardSerialize";
-import { SHORTCUT_DEFS, fileShortcutFor, matchesShortcut, tabKeyAction, type FileShortcut, type ShortcutId, type ShortcutOverrides } from "./keyboardShortcuts";
+import { SHORTCUT_DEFS, TOOL_SHORTCUT_IDS, fileShortcutFor, matchesShortcut, tabKeyAction, type FileShortcut, type ShortcutOverrides } from "./keyboardShortcuts";
 import { isPrimaryMod } from "./platform";
 import { isTauriRuntime } from "../native/projectFile";
 import { isolateSelectionLayerCodes, showAllLayerCodes } from "./layerIsolate";
@@ -175,19 +175,6 @@ export function useCommandTabShortcut(
  * Ebenen-Art über ein Ref (sonst müsste der Effekt bei jedem Render neu
  * registrieren).
  */
-/** Reihenfolge/Zuordnung Ziffer→Werkzeug — Ids der rebindbaren Kombination in `keyboardShortcuts.ts`. */
-const TOOL_SHORTCUT_IDS: { id: ShortcutId; tool: ToolId }[] = [
-  { id: "toolText", tool: "text" },
-  { id: "toolLine", tool: "line" },
-  { id: "toolCircle", tool: "circle" },
-  { id: "toolRect", tool: "rect" },
-  { id: "toolPolyline", tool: "polyline" },
-  { id: "toolWall", tool: "wall" },
-  { id: "toolCeiling", tool: "ceiling" },
-  { id: "toolWindow", tool: "window" },
-  { id: "toolDoor", tool: "door" },
-  { id: "toolRoom", tool: "room" },
-];
 
 export function useToolNumberShortcuts(
   onSelectTool: (id: ToolId) => void,
@@ -228,7 +215,7 @@ export function useToolNumberShortcuts(
       if (!match) return;
       if (!toolShortcutRef.current.floor) return; // Werkzeuge nur auf Geschossen
       e.preventDefault();
-      toolShortcutRef.current.onSelectTool(match.tool);
+      toolShortcutRef.current.onSelectTool(match.tool as ToolId);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
