@@ -356,13 +356,6 @@ pub fn occlude_in_section(groups: Vec<(f64, Vec<Primitive>)>, occ: &[super::sect
     if occ.is_empty() {
         return groups.into_iter().flat_map(|(_, g)| g).collect();
     }
-    let mut flat = vec![occ.len() as f64];
-    for o in occ {
-        flat.extend([o.depth, o.pts.len() as f64]);
-        for q in &o.pts {
-            flat.extend(q);
-        }
-    }
     // Alle Strecken der Gruppen in einem Aufruf; `owner` = Index in `slots`.
     let mut segs = vec![0.0];
     let mut slots: Vec<(usize, usize)> = Vec::new(); // (Gruppe, Primitiv)
@@ -391,7 +384,18 @@ pub fn occlude_in_section(groups: Vec<(f64, Vec<Primitive>)>, occ: &[super::sect
             ranges.push(from..count);
         }
     }
+    // [327] Nichts zu verdecken (kein Baum, keine Entourage im Schnitt): die Verdecker gar nicht erst aufbereiten.
+    if count == 0 {
+        return groups.into_iter().flat_map(|(_, g)| g).collect();
+    }
     segs[0] = count as f64;
+    let mut flat = vec![occ.len() as f64];
+    for o in occ {
+        flat.extend([o.depth, o.pts.len() as f64]);
+        for q in &o.pts {
+            flat.extend(q);
+        }
+    }
     let res = super::elevation_geom::clip_segments(&flat, &segs);
     // Ergebnis je Strecke: [c, (ax, ay, bx, by) × c]; leer = Eingabe unbrauchbar, nichts verdecken.
     let mut parts: Vec<Vec<(Vec2, Vec2)>> = Vec::new();

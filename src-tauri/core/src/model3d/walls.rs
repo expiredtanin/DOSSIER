@@ -606,8 +606,32 @@ pub(crate) fn floor_join_cuts(jw: &[JoinWall], finite: bool) -> Vec<WallCuts> {
     if !finite {
         return vec![WallCuts::default(); jw.len()];
     }
+    // [327] Je Geschoss gemerkt (Eingabe bitgleich verglichen): Wände und Decken einer Ableitung fragen dieselben
+    // Geschosse je einmal ab, die nächste Ableitung (Schnitt, Ansicht, 3D) bei unveränderten Wänden wieder.
+    type Entry = (u64, Vec<JoinWall>, Vec<WallCuts>);
+    thread_local! {
+        static SEEN: std::cell::RefCell<std::collections::VecDeque<Entry>> = const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
+    }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    jw.len().hash(&mut h);
+    for w in jw {
+        [w.start.x.to_bits(), w.start.y.to_bits(), w.end.x.to_bits(), w.end.y.to_bits()].hash(&mut h);
+    }
+    let key = h.finish();
+    if let Some(v) = SEEN.with(|m| m.borrow().iter().find(|e| e.0 == key && e.1 == jw).map(|e| e.2.clone())) {
+        return v;
+    }
     // Mit den Rückfällen oben nicht mehr erwartet: dann eben ohne Verschneidung.
-    joins::compute_joins(jw).unwrap_or_else(|_| vec![WallCuts::default(); jw.len()])
+    let v = joins::compute_joins(jw).unwrap_or_else(|_| vec![WallCuts::default(); jw.len()]);
+    SEEN.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() >= 64 {
+            m.pop_front();
+        }
+        m.push_back((key, jw.to_vec(), v.clone()));
+    });
+    v
 }
 
 pub(crate) fn floor_context(p: &Project, floor_id: &str, with_ceilings: bool) -> FloorContext {

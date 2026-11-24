@@ -694,8 +694,16 @@ fn merge_collinear(walls: &[JoinWall], result: &mut [WallCuts]) {
         End::Start => c.start_cut,
         End::End => c.end_cut,
     };
+    // [327] Vorab je Wand, was `same_band` zuerst prüft (Länge, Bogen, Richtung): die meisten Paare eines Geschosses
+    // sind nicht parallel und fallen so ohne den Aufruf weg (grosses Projekt: 26 000 Paare je Geschoss).
+    let pre: Vec<Option<(bool, Vec2)>> = walls.iter().map(|w| (len(sub(w.end, w.start)) >= 1e-9).then(|| (arc_of(w).is_some(), dir_of(w)))).collect();
     for a in 0..walls.len() {
+        let Some((arc_a, ua)) = pre[a] else { continue };
         for b in a + 1..walls.len() {
+            let Some((arc_b, ub)) = pre[b] else { continue };
+            if arc_a != arc_b || (!arc_a && kernel2d::cross(ua, ub).abs() > 1e-6) {
+                continue;
+            }
             if result[a].covered || result[b].covered || same_band(walls, a, b).is_none() {
                 continue;
             }
