@@ -148,7 +148,8 @@ fn bench159() {
                 plan_domains_cached(p, revs, cache, &a, &Default::default()).unwrap();
             };
             call(&mut doc);
-            let wall = p.walls.iter().find(|w| w.floor_id == "eg").unwrap().id.clone();
+            // `BENCH_WALL=eg-iw-y5`: diese Wand statt der ersten des EG.
+            let wall = std::env::var("BENCH_WALL").unwrap_or_else(|_| p.walls.iter().find(|w| w.floor_id == "eg").unwrap().id.clone());
             let t = Instant::now();
             for i in 0..runs {
                 let mut w = serde_json::to_value(doc.project().unwrap().walls.iter().find(|w| w.id == wall).unwrap()).unwrap();
