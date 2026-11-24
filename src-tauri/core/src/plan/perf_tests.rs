@@ -125,7 +125,7 @@ fn bench159() {
     // 21. Juni, 10 Uhr UTC (Sonnenstudie, [142]).
     let sun = Some(1_782_036_000_000.0);
     let floors: Vec<String> = p.drawing_levels.iter().filter(|l| l.kind == crate::model::DrawingLevelKind::Floor && l.layout_id.is_none()).map(|l| l.id.clone()).collect();
-    // `BENCH_ONLY=elevation|elevation-shadow|section|3d|ifc`: nur dieser Teil, einmal (für `valgrind --tool=callgrind`).
+    // `BENCH_ONLY=elevation|elevation-shadow|section|3d|ifc|edit`: nur dieser Teil, einmal (für `valgrind --tool=callgrind`).
     if let Ok(only) = std::env::var("BENCH_ONLY") {
         for l in p.drawing_levels.iter().filter(|l| l.line_points.is_some() && l.layout_id.is_none()) {
             let text = serde_json::json!({ "level": serde_json::to_value(l).unwrap() }).to_string();
@@ -138,6 +138,27 @@ fn bench159() {
                 _ => continue,
             }
             println!("{}: {:.1} ms", l.id, ms(t));
+        }
+        // Grundriss EG 1:50 nach dem Verschieben der ersten Wand (Dokument mit Caches; `BENCH_RUNS` Wiederholungen).
+        if only == "edit" {
+            let mut doc = crate::document::Document::from_json(&json).unwrap();
+            let a = plan_args(&p, "eg", 50.0, None);
+            let call = |doc: &mut crate::document::Document| {
+                let (p, revs, cache) = doc.project_cached().unwrap();
+                plan_domains_cached(p, revs, cache, &a, &Default::default()).unwrap();
+            };
+            call(&mut doc);
+            let wall = p.walls.iter().find(|w| w.floor_id == "eg").unwrap().id.clone();
+            let t = Instant::now();
+            for i in 0..runs {
+                let mut w = serde_json::to_value(doc.project().unwrap().walls.iter().find(|w| w.id == wall).unwrap()).unwrap();
+                w["start"]["x"] = serde_json::json!(w["start"]["x"].as_f64().unwrap() + 0.01);
+                w["end"]["x"] = serde_json::json!(w["end"]["x"].as_f64().unwrap() + 0.01);
+                let o = crate::ops::ops_from_json(&serde_json::json!([{ "kind": "replace", "collection": "walls", "entity": w }])).unwrap();
+                doc.commit(o, None, (i + 1) as f64 * 1e4, false).unwrap();
+                call(&mut doc);
+            }
+            println!("edit: {:.1} ms je Lauf", ms(t) / runs as f64);
         }
         if only == "ifc" {
             let t = Instant::now();

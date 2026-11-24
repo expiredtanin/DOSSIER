@@ -878,9 +878,10 @@ thread_local! {
 
 fn hash_of(p: &Project, t: &TerrainMesh, ex: &[&Excavation]) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
-    for v in t.positions.iter().chain(&t.indices) {
-        v.to_bits().hash(&mut h);
-    }
+    // [327] Das Netz in einem schnellen Durchgang (Multiplikation je Wert) statt Wert für Wert durch SipHash: der
+    // Schlüssel wird je Grundriss Dutzende Male gebildet und kostete ein Fünftel des Neuaufbaus nach einer Wandänderung.
+    let fold = |vals: &[f64]| vals.iter().fold(vals.len() as u64, |acc, v| (acc.rotate_left(5) ^ v.to_bits()).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    (fold(&t.positions), fold(&t.indices)).hash(&mut h);
     p.reference_elevation_masl.map(f64::to_bits).hash(&mut h);
     for e in ex {
         serde_json::to_string(e).unwrap_or_default().hash(&mut h);

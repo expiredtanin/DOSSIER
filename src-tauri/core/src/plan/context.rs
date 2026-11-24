@@ -546,7 +546,8 @@ impl<'a> HouseIndex<'a> {
             return false;
         }
         // Erste Ecke eines Rings im Rechteck der Beschriftung?
-        if self.rings.iter().any(|h| h.len() >= 3 && point_in_ring(ring, [h[0].x, h[0].y])) {
+        // [327] Nur Ecken im Hüllrechteck der Beschriftung können in ihr liegen.
+        if self.rings.iter().any(|h| h.len() >= 3 && h[0].x >= b[0] && h[0].x <= b[2] && h[0].y >= b[1] && h[0].y <= b[3] && point_in_ring(ring, [h[0].x, h[0].y])) {
             return true;
         }
         let mut scratch = self.scratch.borrow_mut();
@@ -757,7 +758,13 @@ struct ContourData {
     isos: Vec<Iso>,
     drawn: Vec<Vec<bool>>,
     grid: SegGrid,
+    /// [327] Je Lage einer Beschriftung (Linie, Bogenlänge), was nur an den Linien hängt: `None` = Linie dort zu krumm,
+    /// sonst Mitte, Richtung und (sobald gebraucht) die Zahl gekreuzter Linien. Nach einer Änderung am Haus sucht die
+    /// Beschriftung dieselben Lagen wieder ab; Haus, Hindernisse und Nachbar-Beschriftungen prüft sie neu.
+    spots: std::cell::RefCell<std::collections::HashMap<(usize, u64), Option<LabelSpot>>>,
 }
+
+type LabelSpot = ([f64; 2], [f64; 2], Option<usize>);
 
 type ContourKey = (u64, u64, i64, u64);
 thread_local! {
@@ -819,7 +826,7 @@ fn contour_data(st: &crate::excavation::SiteTerrain, iv: f64, every: i64, scale:
             }
         }
     }
-    ContourData { isos, drawn, grid }
+    ContourData { isos, drawn, grid, spots: Default::default() }
 }
 
 /// [T6] Höhenlinien aus dem Gelände-Netz (samt Baugruben) in der Äquidistanz `contourInterval`; jede
@@ -879,7 +886,7 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
         });
         v
     });
-    let ContourData { isos, drawn, grid } = &*data;
+    let ContourData { isos, drawn, grid, spots } = &*data;
     let obst_grid = super::stamp_place::ObstacleGrid::new(obst, 4.0 * text_h);
     let house_idx = HouseIndex::new(house);
     let in_house = |ring: &[[f64; 2]]| house_idx.overlaps(ring);
@@ -928,13 +935,15 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
                     }) {
                         continue;
                     }
-                    let (a, b) = (l.at(s - hw), l.at(s + hw));
-                    let cl = (b[0] - a[0]).hypot(b[1] - a[1]);
-                    if !(cl > 1.6 * hw) || l.bend(s - hw, s + hw) > 0.3 * text_h {
-                        continue;
-                    }
-                    let u = [(b[0] - a[0]) / cl, (b[1] - a[1]) / cl];
-                    let m = [(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0];
+                    let spot = *spots.borrow_mut().entry((li, s.to_bits())).or_insert_with(|| {
+                        let (a, b) = (l.at(s - hw), l.at(s + hw));
+                        let cl = (b[0] - a[0]).hypot(b[1] - a[1]);
+                        if !(cl > 1.6 * hw) || l.bend(s - hw, s + hw) > 0.3 * text_h {
+                            return None;
+                        }
+                        Some(([(a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0], [(b[0] - a[0]) / cl, (b[1] - a[1]) / cl], None))
+                    });
+                    let Some((m, u, known_x)) = spot else { continue };
                     let padded = rot_rect(m, u, hw + pad_house, hv + pad_house);
                     if in_house(&padded) || obst_grid.hits_convex(&padded) {
                         continue;
@@ -945,7 +954,13 @@ fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i
                     if placed.iter().any(|(r, rb)| rb[2] >= gb[0] && rb[0] <= gb[2] && rb[3] >= gb[1] && rb[1] <= gb[3] && super::stamp_place::convex_overlap(r, &grown)) {
                         continue;
                     }
-                    let x = grid.crossings(&rot_rect(m, u, hw, hv), li);
+                    let x = known_x.unwrap_or_else(|| {
+                        let x = grid.crossings(&rot_rect(m, u, hw, hv), li);
+                        if let Some(Some(e)) = spots.borrow_mut().get_mut(&(li, s.to_bits())) {
+                            e.2 = Some(x);
+                        }
+                        x
+                    });
                     if x > max_x {
                         continue;
                     }
