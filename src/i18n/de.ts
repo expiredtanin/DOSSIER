@@ -3260,6 +3260,8 @@ export const de = {
   "recover.damagedOlder": "Die neueste automatische Sicherung war beschädigt; angeboten wird der vorherige Stand.",
   "project.change.rejected": "Änderung abgelehnt:",
   "settings.section.network": "Netzwerk",
+  "settings.gripRelease": "Griffe beim Loslassen übernehmen",
+  "settings.gripRelease.hint": "Ein gezogener Griff (Eckpunkt, Kante) gilt beim Loslassen der Maustaste, wie in Archicad und Vectorworks. Ein Klick ohne Ziehen hält den Griff weiter fest: Wert tippen oder an der Zielstelle klicken. Aus: jeder Griff gilt erst mit dem nächsten Klick oder Enter.",
   "settings.offline": "Offline-Modus",
   "settings.offline.hint": "Sperrt alle Internet-Abrufe (Materialbibliothek, swisstopo, OpenStreetMap). Bereits geladene Daten bleiben nutzbar.",
   "settings.section.ai": "KI-Zugriff",

@@ -9,6 +9,7 @@
 // Overlay, Klick auf Hintergrund + Esc schliessen).
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
+import { getGripCommitOnRelease, setGripCommitOnRelease } from "../state/gripPrefs";
 import { useEffect, useState } from "react";
 import { LANGUAGE_PREFS, t, type LanguagePref, type TranslationKey } from "../i18n";
 import { useModalFocus } from "./modalFocus";
@@ -155,6 +156,7 @@ export function SettingsDialog({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [runningVersion, setRunningVersion] = useState<string | null>(null);
   const [checkOnStart, setCheckOnStart] = useState<boolean>(() => getUpdateCheckOnStart());
+  const [gripRelease, setGripRelease] = useState<boolean>(() => getGripCommitOnRelease());
   const [snoozeUntil, setSnoozeUntilState] = useState<number | null>(() => getUpdateSnoozeUntil());
   const [versionHistory, setVersionHistory] = useState<VersionEntry[] | null>(null);
   const [selectedTag, setSelectedTag] = useState<string>("");
@@ -245,6 +247,20 @@ export function SettingsDialog({
           <section className="imp-section">
             <div className="imp-section-title">{t("settings.section.workspace")}</div>
             <LayoutMenu layout={layout} onApply={onApplyLayout} />
+            {/* [329] Griffe beim Loslassen übernehmen (Archicad/Vectorworks), sonst bis zum nächsten Klick bewaffnet. */}
+            <label className="settings-check">
+              <input
+                type="checkbox"
+                data-testid="settings-grip-release"
+                checked={gripRelease}
+                onChange={(e) => {
+                  setGripCommitOnRelease(e.target.checked);
+                  setGripRelease(e.target.checked);
+                }}
+              />
+              {t("settings.gripRelease")}
+            </label>
+            <div className="imp-note">{t("settings.gripRelease.hint")}</div>
           </section>
 
           <section className="imp-section">

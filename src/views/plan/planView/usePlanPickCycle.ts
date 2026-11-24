@@ -2,6 +2,7 @@
 // Klick-Zyklen (Cmd/Strg+Klick, einfacher Klick) und `endDrag` (Pointer-Up: Auswahl, Marquee, Drag-Ende).
 // Aufgerufen einmal von `PlanView`.
 
+import { gripCommitsOnRelease } from "../../../state/gripPrefs";
 import type { Selection } from "../../../state/selection";
 import { useState, useEffect, useRef } from "react";
 import type { PickCandidate, PickIds } from "./types";
@@ -478,6 +479,20 @@ export function usePlanPickCycle(inp: UsePlanPickCycleArgs) {
       }
       stampDrag.current = null;
       return;
+    }
+    // [329] Einstellung „Griffe beim Loslassen übernehmen“: ein gezogener Griff gilt jetzt (ein Klick ohne Ziehen bleibt
+    // bewaffnet, s. unten). Die Position ist oben (`flushDragMove`) schon auf die Loslass-Stelle gesetzt.
+    {
+      const gd = gripDrag.current?.pointerId === e.pointerId ? gripDrag.current : null;
+      const ed = edgeDrag.current?.pointerId === e.pointerId ? edgeDrag.current : null;
+      const d = gd ?? ed;
+      if (d && gripHandlers && d.startX !== undefined && d.startY !== undefined && gripCommitsOnRelease(d.startX, d.startY, e.clientX, e.clientY)) {
+        gripDrag.current = null;
+        edgeDrag.current = null;
+        if (gd) gripHandlers.onGripEnd();
+        else gripHandlers.onEdgeEnd();
+        return;
+      }
     }
     // Kanten-Griff: Maus loslassen beendet die Bearbeitung NICHT mehr — kein
     // Pointer-Capture gehalten, der Griff bleibt bewaffnet und folgt weiter dem

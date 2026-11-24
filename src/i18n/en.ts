@@ -3206,6 +3206,8 @@ export const en: Record<TranslationKey, string> = {
   "recover.damagedOlder": "The newest automatic backup was damaged; the previous version is offered instead.",
   "project.change.rejected": "Change rejected:",
   "settings.section.network": "Network",
+  "settings.gripRelease": "Commit grips on release",
+  "settings.gripRelease.hint": "A dragged grip (vertex, edge) applies when you release the mouse button, as in Archicad and Vectorworks. A click without dragging keeps the grip armed: type a value or click at the target. Off: every grip applies only with the next click or Enter.",
   "settings.offline": "Offline mode",
   "settings.offline.hint": "Blocks all internet access (material library, swisstopo, OpenStreetMap). Already loaded data stays available.",
   "settings.section.ai": "AI access",
