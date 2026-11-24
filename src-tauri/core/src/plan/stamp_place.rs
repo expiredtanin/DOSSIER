@@ -64,6 +64,24 @@ impl Obstacles {
         h.finish()
     }
 
+    /// [327] Wie [`Self::sig`], aber nur über die Strecken und Flächen, deren Hüllrechteck `keep` behält.
+    pub fn sig_where(&self, keep: &dyn Fn([f64; 4]) -> bool) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for s in self.segs.iter().filter(|s| keep(ring_bbox(&s[..]))) {
+            for q in s {
+                (q[0].to_bits(), q[1].to_bits()).hash(&mut h);
+            }
+        }
+        for (a, _) in self.areas.iter().zip(&self.boxes).filter(|(_, b)| keep(**b)) {
+            a.len().hash(&mut h);
+            for q in a {
+                (q[0].to_bits(), q[1].to_bits()).hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
     /// [179] Hindernisse von `o` hinten anhängen (Reihenfolge wie einzelnes `add_prim`).
     pub fn extend(&mut self, o: &Obstacles) {
         self.segs.extend_from_slice(&o.segs);

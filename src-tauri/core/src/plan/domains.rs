@@ -248,6 +248,12 @@ impl<'a> Ctx<'a> {
         &self.obstacles().gaps
     }
 
+    /// [327] Aussparungen, wie [`Self::cut_at_gaps`] sie anwendet (`None`, solange die Hindernisse selbst entstehen:
+    /// dann spart es nichts aus), und ihr Rand in Modell-m.
+    pub(super) fn gaps_applied(&self) -> Option<(&super::stamp_place::Obstacles, f64)> {
+        (!self.obst_busy.get()).then(|| (self.line_gaps(), LINE_GAP_MM * self.a.scale.max(1.0) / 1000.0))
+    }
+
     /// [256] Hilfslinie a–b ohne die Stücke vor Masszahlen, Texten und Höhenkoten ([`Self::line_gaps`], 0.5 mm Papier Rand).
     pub(super) fn cut_at_gaps(&self, a: Vec2, b: Vec2) -> Vec<(Vec2, Vec2)> {
         if self.obst_busy.get() {

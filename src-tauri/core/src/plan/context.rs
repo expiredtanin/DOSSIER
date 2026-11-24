@@ -872,7 +872,54 @@ thread_local! {
 }
 
 /// [`terrain_contours`] ohne Zwischenspeicher.
+/// [327] Höhenlinien samt Beschriftung, je Eingabe gemerkt: Gelände/Äquidistanz/Massstab, Fussabdruck `house` und
+/// die Hindernisse `obst` und Aussparungen (`Ctx::gaps_applied`) — von diesen aber nur, was nicht tief im Haus liegt:
+/// Linien und Beschriftungen stehen nur ausserhalb des Fussabdrucks (`HouseIndex::outside`, `overlaps`), ein Hindernis,
+/// dessen Hüllrechteck samt Rand ganz im Fussabdruck liegt, berührt sie nie. So bleibt das Gelände stehen, wenn sich
+/// nur im Haus etwas ändert (Innenwand verschoben → Masszahl im Raum anders), statt alle Beschriftungen neu zu suchen.
 fn contour_prims(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i64, out: &mut Vec<Primitive>, house: &[Vec<Vec2>], obst: &super::stamp_place::Obstacles) {
+    type Key = (ContourKey, u64, u64, Option<u64>);
+    thread_local! {
+        static DONE: std::cell::RefCell<Vec<(Key, std::rc::Rc<Vec<Primitive>>)>> = const { std::cell::RefCell::new(Vec::new()) };
+    }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    house.len().hash(&mut h);
+    for r in house {
+        r.len().hash(&mut h);
+        for q in r {
+            (q.x.to_bits(), q.y.to_bits()).hash(&mut h);
+        }
+    }
+    let scale = c.a.scale.max(1.0);
+    let gaps = c.gaps_applied();
+    // Rand: der der Aussparungen und 1 mm Luft zum Umriss.
+    let margin = gaps.map_or(0.0, |g| g.1) + 1e-3;
+    let house_idx = HouseIndex::new(house);
+    let deep = |b: [f64; 4]| {
+        b.iter().all(|v| v.is_finite())
+            && [0.0, margin].iter().all(|m| {
+                let q = [v2(b[0] - m, b[1] - m), v2(b[2] + m, b[1] - m), v2(b[2] + m, b[3] + m), v2(b[0] - m, b[3] + m)];
+                (0..4).all(|i| house_idx.outside(q[i], q[(i + 1) % 4]).is_empty())
+            })
+    };
+    let keep = |b: [f64; 4]| !deep(b);
+    let key: Key = ((st.key, iv.to_bits(), every, scale.to_bits()), h.finish(), obst.sig_where(&keep), gaps.map(|g| g.0.sig_where(&keep)));
+    if let Some(v) = DONE.with(|m| m.borrow().iter().find(|(k, _)| *k == key).map(|(_, v)| v.clone())) {
+        out.extend(v.iter().cloned());
+        return;
+    }
+    let mut fresh = Vec::new();
+    contour_prims_fresh(c, st, iv, every, &mut fresh, house, obst);
+    out.extend(fresh.iter().cloned());
+    DONE.with(|m| {
+        let mut m = m.borrow_mut();
+        m.insert(0, (key, std::rc::Rc::new(fresh)));
+        m.truncate(4);
+    });
+}
+
+fn contour_prims_fresh(c: &Ctx, st: &crate::excavation::SiteTerrain, iv: f64, every: i64, out: &mut Vec<Primitive>, house: &[Vec<Vec2>], obst: &super::stamp_place::Obstacles) {
     let scale = c.a.scale.max(1.0);
     let text_h = 0.002 * scale;
     // [159] Linien, Ausdünnung und Raster hängen nur am Gelände, an der Äquidistanz und am Massstab: zwischengespeichert.
@@ -2541,6 +2588,46 @@ mod tests {
         // Ohne Zwischenspeicher: dieselben Höhenlinien-Primitive (nach dem Rahmen und der Pick-Fläche).
         let tail: Vec<&Primitive> = a3.iter().skip(5).collect();
         assert_eq!(tail, f3.iter().collect::<Vec<_>>());
+    }
+
+    /// [327] Gemerkte Höhenlinien bei geänderten Hindernissen = neu gerechnete: ein Hindernis tief im Haus ändert
+    /// nichts (Treffer im Speicher), eines am Umriss oder auf dem Gelände schon — immer dasselbe wie ohne Speicher.
+    #[test]
+    fn hoehenlinien_gemerkt_trotz_hindernis_im_haus() {
+        let t = TerrainMesh { id: "t".into(), category_code: "02".into(), positions: vec![0.0, 0.0, 0.0, 40.0, 0.0, 2.0, 40.0, 30.0, 9.0, 0.0, 30.0, 4.0, 20.0, 15.0, 7.5], indices: vec![0.0, 1.0, 4.0, 1.0, 2.0, 4.0, 2.0, 3.0, 4.0, 3.0, 0.0, 4.0], contour_interval: Some(0.1), ..Default::default() };
+        let mut p = sample_with_walls(serde_json::json!([["w1", "eg", 5, 5, 15, 5], ["w2", "eg", 15, 5, 15, 12], ["w3", "eg", 15, 12, 5, 12], ["w4", "eg", 5, 12, 5, 5]]));
+        p.context = Some(vec![ContextObject::TerrainMesh(t.clone())]);
+        let a = super::super::domains::PlanArgs::parse(1.0, r#"{"floor": "eg", "show": ["02", "80"], "scale": 100}"#).unwrap();
+        let c = Ctx::new(&p, &a);
+        let house = terrain_footprint(&p, "eg");
+        let st = crate::excavation::site_terrain(&p, &t);
+        let rect = |x0: f64, y0: f64, x1: f64, y1: f64| vec![[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+        let obst = |rects: &[Vec<[f64; 2]>]| {
+            let mut o = super::super::stamp_place::Obstacles::default();
+            for r in rects {
+                o.area(r.clone());
+            }
+            o
+        };
+        // Hindernis auf dem Gelände: auf der ersten Beschriftung, die ohne Hindernisse entsteht.
+        let mut free = Vec::new();
+        contour_prims_fresh(&c, &st, 0.1, 5, &mut free, &house, &Default::default());
+        let at = free.iter().find_map(|q| if let Primitive::DrawingText { at, .. } = q { Some(*at) } else { None }).unwrap();
+        let (in_a, in_b, edge, land) = (rect(8.0, 7.0, 10.0, 9.0), rect(9.0, 8.0, 12.0, 10.0), rect(14.0, 8.0, 17.0, 9.0), rect(at.x - 0.5, at.y - 0.5, at.x + 0.5, at.y + 0.5));
+        let mut seen: Vec<Vec<Primitive>> = Vec::new();
+        for set in [vec![in_a.clone()], vec![in_b.clone()], vec![edge.clone()], vec![in_a.clone(), land.clone()], vec![in_b, land], vec![in_a, edge]] {
+            let o = obst(&set);
+            let (mut memo, mut fresh) = (Vec::new(), Vec::new());
+            contour_prims(&c, &st, 0.1, 5, &mut memo, &house, &o);
+            contour_prims_fresh(&c, &st, 0.1, 5, &mut fresh, &house, &o);
+            assert!(fresh.len() > 100);
+            assert_eq!(memo, fresh);
+            seen.push(fresh);
+        }
+        // Im Haus: gleich; am Umriss oder auf dem Gelände: anders.
+        assert_eq!(seen[0], seen[1]);
+        assert_eq!(seen[3], seen[4]);
+        assert_ne!(seen[0], seen[3]);
     }
 
     /// [159] Rechteck-Vortest in `outside_bb` = ohne: zufällige Strecken um zwei Ringe.
