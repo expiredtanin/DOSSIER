@@ -8,18 +8,20 @@
 // `Queue` und ein `TextureView` (die Surface oder eine Offscreen-Textur) und
 // zeichnet dort hinein. Die Fenster-Anbindung (winit) liegt separat im Spike-Bin.
 //
-// Pro-Batch-Uniforms ueber DYNAMISCHE Offsets: alle Globals-Bloecke (je Fuell-/
-// Linien-Batch einer) liegen hintereinander in EINEM Uniform-Puffer (auf die
-// GPU-Mindest-Ausrichtung gepolstert). Vor dem Zeichnen wird der ganze Puffer
-// EINMAL geschrieben; jeder Draw-Call bindet seinen Block per dynamischem Offset.
-// Das umgeht die Regel "kein write_buffer auf gebundenen Puffer im offenen Pass".
+// Szene als Render-Bundle (Leistung, 25.11.): die Werte je Batch (Farbe, Papier-mm-Breite) liegen STATISCH in einem
+// Uniform-Puffer (group 0, dynamischer Offset), beim Hochladen einmal geschrieben; die Werte des Bildes (Projektion,
+// Zeichenpuffer, mm->px) in einem kleinen Bild-Uniform (group 1). Die ganze Zeichenfolge (Fuellungen, Linien, Striche
+// in Maler-Reihenfolge) wird beim Hochladen EINMAL als Render-Bundle aufgezeichnet; je Bild bleiben ein 96-Byte-
+// `write_buffer` und `execute_bundles`. Vorher je Bild: alle Batch-Bloecke neu schreiben (bei grossen Plaenen
+// ~370 KB) und je Batch Pipeline/Puffer/Bind-Group setzen und zeichnen — im Browser tausende WebGPU-Aufrufe je Bild
+// (gemessen: Grossgebaeude 1456 Draws, 1275 Pipeline-Wechsel, Bilder bis 0.8 s beim Zoomen).
 
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
 use crate::ortho::{compute_ortho_matrix, corrected_view_box, meet_scale, mm_to_device_px, Mat4};
-use crate::shaders::{ARC_WGSL, DASH_LINE_WGSL, FILL_WGSL, LINE_WGSL};
-use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, BatchKind, DashSegment, GpuGeometry, MAX_ARC_DASH, MAX_LINE_DASH};
+use crate::shaders::{scene_variant, ARC_WGSL, DASH_LINE_WGSL, FILL_WGSL, LINE_WGSL};
+use crate::tessellate::{compile_scene, to_screen, ArcInstanceData, BatchKind, DashSegment, MAX_ARC_DASH, MAX_LINE_DASH};
 use crate::glyph::GlyphText;
 use crate::text_lines::GlyphLine;
 use crate::types::{Scene, ViewBox};
@@ -30,31 +32,30 @@ const SAMPLE_COUNT: u32 = 4;
 /// Uniform-Block, 1:1 zum WGSL-`Globals`-Struct. std140-kompatibel ausgelegt
 /// (16-Byte-Alignment der mat4/vec4, Skalare am Ende gepackt).
 #[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Globals {
-    view_proj: [f32; 16],
+#[derive(Clone, Copy, Pod, Zeroable, Default)]
+struct BatchUniform {
     color: [f32; 4],
-    viewport_px: [f32; 2],
+    /// Papier-mm-Breite (Fuellungen 0).
     stroke_px: f32,
-    stroke_scale: f32,
-    /// Faktor auf die Strichmuster-Laengen ([96]): Muster sind bei 1:100 kompiliert, auf dem Papier
-    /// gelten sie in mm — bei 1:N also `N / 100` (Papier-mm-Batches), sonst 1.
-    dash_scale: f32,
-    _pad: [f32; 3],
+    /// 1 = Breite in Bildschirm-Einheiten (Schraffur-Striche, an die Musterkachel gekoppelt), sonst Papier-mm.
+    width_screen: f32,
+    _pad: [f32; 2],
 }
 
-impl Default for Globals {
-    fn default() -> Self {
-        Self {
-            view_proj: crate::ortho::identity(),
-            color: [0.0, 0.0, 0.0, 1.0],
-            viewport_px: [1.0, 1.0],
-            stroke_px: 0.0,
-            stroke_scale: 1.0,
-            dash_scale: 1.0,
-            _pad: [0.0; 3],
-        }
-    }
+/// Bild-Uniform der Szenen-Pipelines (group 1, `SPLIT_UNIFORMS_WGSL` `Frame`).
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct FrameUniform {
+    view_proj: [f32; 16],
+    viewport_px: [f32; 2],
+    /// Papier-mm -> Geraete-px.
+    mm_px: f32,
+    /// Geraete-px je Bildschirm-Einheit (meet-Skala).
+    px_per_screen: f32,
+    /// Faktor auf die Strichmuster-Laengen ([96]): Muster sind bei 1:100 kompiliert, auf dem Papier
+    /// gelten sie in mm — bei 1:N also `N / 100` (Papier-mm-Batches; Bildschirm-Striche 1, im Shader).
+    dash_scale: f32,
+    _pad: [f32; 3],
 }
 
 /// Frame-Uniform der analytischen Bogen-Pipeline (1:1 zu `ArcGlobals` in WGSL).
@@ -162,19 +163,21 @@ fn align_up(size: u64, align: u64) -> u64 {
     ((size + align - 1) / align) * align
 }
 
-/// GPU-seitige Puffer + Batch-Metadaten einer tessellierten Szene.
+/// GPU-seitige Puffer einer tessellierten Szene. Die Szenen-Puffer werden nur noch vom Bundle gelesen, bleiben aber
+/// hier gehalten: im WebGPU-Backend gibt das Freigeben eines Puffers ihn sofort frei (`destroy`), das Bundle waere leer.
 struct SceneBuffers {
-    fill_vbo: Option<wgpu::Buffer>,
-    fill_ibo: Option<wgpu::Buffer>,
-    line_vbo: Option<wgpu::Buffer>,
-    line_ibo: Option<wgpu::Buffer>,
+    _fill_vbo: Option<wgpu::Buffer>,
+    _fill_ibo: Option<wgpu::Buffer>,
+    _line_vbo: Option<wgpu::Buffer>,
+    _line_ibo: Option<wgpu::Buffer>,
     /// Instanz-Puffer der analytischen Boegen (je Bogen EINE Instanz); None wenn leer.
     arc_vbo: Option<wgpu::Buffer>,
     /// Anzahl Bogen-Instanzen (Draw: 6 Vertices je Instanz).
     arc_count: u32,
-    /// Instanz-Puffer der gestrichelten Segmente; None wenn leer.
-    dash_vbo: Option<wgpu::Buffer>,
-    geo: GpuGeometry,
+    _dash_vbo: Option<wgpu::Buffer>,
+    _batch_buffer: wgpu::Buffer,
+    /// Fuellungen, Linien und Striche in Maler-Reihenfolge, einmal aufgezeichnet.
+    bundle: Option<wgpu::RenderBundle>,
 }
 
 /// Der native 2D-Renderer: haelt beide Pipelines, den (dynamischen) Uniform-
@@ -185,16 +188,18 @@ pub struct Renderer {
     line_pipeline: wgpu::RenderPipeline,
     /// Gestrichelte Linien (Muster im Fragment-Shader, `DASH_LINE_WGSL`), gleiche Globals.
     dash_pipeline: wgpu::RenderPipeline,
-    bind_group_layout: wgpu::BindGroupLayout,
+    /// Layout der Batch-Werte (group 0, dynamischer Offset).
+    batch_layout: wgpu::BindGroupLayout,
+    /// Bild-Uniform (group 1) samt Bind-Group, je Bild einmal geschrieben.
+    frame_uniform: wgpu::Buffer,
+    frame_bind_group: wgpu::BindGroup,
     /// Analytische Bogen-Pipeline (exakter Kreis-Shader, `ARC_WGSL`).
     arc_pipeline: wgpu::RenderPipeline,
     /// Frame-Uniform der Bogen-Pipeline (ein Block, kein dynamischer Offset).
     arc_uniform: wgpu::Buffer,
     arc_bind_group: wgpu::BindGroup,
-    /// Ausgerichtete Groesse eines Globals-Blocks im dynamischen Uniform-Puffer.
+    /// Ausgerichtete Groesse eines Batch-Blocks im Uniform-Puffer der Szene.
     uniform_stride: u64,
-    /// Aktuell allozierter Uniform-Puffer + zugehoerige Bind-Group (wachsen bei Bedarf).
-    uniform: Option<UniformArena>,
     scene: Option<SceneBuffers>,
     /// Farbformat der Ziel-Surface (auch Format der MSAA-Textur).
     format: wgpu::TextureFormat,
@@ -223,47 +228,52 @@ pub struct Renderer {
     pub text_scale_n: f32,
 }
 
-/// Ein Uniform-Puffer, der `capacity` Globals-Bloecke fasst, plus Bind-Group.
-struct UniformArena {
-    buffer: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    capacity: u64,
-}
-
 impl Renderer {
     /// Erzeugt Pipelines + Layout fuer ein gegebenes Farbformat (Surface).
     pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
         let fill_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fill.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(FILL_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(scene_variant(FILL_WGSL).expect("fill.wgsl: Globals-Kopf").into()),
         });
         let line_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("line.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(LINE_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(scene_variant(LINE_WGSL).expect("line.wgsl: Globals-Kopf").into()),
         });
 
-        // Ein Uniform-Block (Globals), fuer beide Pipelines geteilt, mit dynamischem
-        // Offset (jeder Batch bekommt seinen eigenen Block-Slice).
-        let bind_group_layout =
-            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some("globals.layout"),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: true,
-                        min_binding_size: wgpu::BufferSize::new(
-                            std::mem::size_of::<Globals>() as u64
-                        ),
-                    },
-                    count: None,
-                }],
-            });
+        // group 0: Batch-Werte (dynamischer Offset, je Batch ein Block, statisch); group 1: Bild-Werte.
+        let uniform_entry = |dynamic: bool, size: usize| wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: dynamic,
+                min_binding_size: wgpu::BufferSize::new(size as u64),
+            },
+            count: None,
+        };
+        let batch_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("batch.layout"),
+            entries: &[uniform_entry(true, std::mem::size_of::<BatchUniform>())],
+        });
+        let frame_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("frame.layout"),
+            entries: &[uniform_entry(false, std::mem::size_of::<FrameUniform>())],
+        });
+        let frame_uniform = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("frame.buffer"),
+            size: std::mem::size_of::<FrameUniform>() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let frame_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("frame.bind"),
+            layout: &frame_layout,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: frame_uniform.as_entire_binding() }],
+        });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("2d.layout"),
-            bind_group_layouts: &[Some(&bind_group_layout)],
+            bind_group_layouts: &[Some(&batch_layout), Some(&frame_layout)],
             immediate_size: 0,
         });
 
@@ -351,7 +361,7 @@ impl Renderer {
         // ── Gestrichelte Linien: je Segment eine Instanz, Quad aus vertex_index ──
         let dash_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("dash.wgsl"),
-            source: wgpu::ShaderSource::Wgsl(DASH_LINE_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(scene_variant(DASH_LINE_WGSL).expect("dash.wgsl: Globals-Kopf").into()),
         });
         let dash_instance_layout = wgpu::VertexBufferLayout {
             array_stride: 16 * 4,
@@ -465,20 +475,21 @@ impl Renderer {
             }],
         });
 
-        // Block-Stride = Globals auf die Dynamic-Offset-Ausrichtung des Geraets gepolstert.
+        // Block-Stride = Batch-Block auf die Dynamic-Offset-Ausrichtung des Geraets gepolstert.
         let min_align = device.limits().min_uniform_buffer_offset_alignment as u64;
-        let uniform_stride = align_up(std::mem::size_of::<Globals>() as u64, min_align.max(1));
+        let uniform_stride = align_up(std::mem::size_of::<BatchUniform>() as u64, min_align.max(1));
 
         Self {
             fill_pipeline,
             line_pipeline,
             dash_pipeline,
-            bind_group_layout,
+            batch_layout,
+            frame_uniform,
+            frame_bind_group,
             arc_pipeline,
             arc_uniform,
             arc_bind_group,
             uniform_stride,
-            uniform: None,
             scene: None,
             format: color_format,
             msaa_view: None,
@@ -506,7 +517,7 @@ impl Renderer {
     /// Puffer werden „mapped at creation" befuellt (nativ der kuerzeste Weg). Im
     /// Browser stattdessen [`Self::upload_scene_queued`] nehmen.
     pub fn upload_scene(&mut self, device: &wgpu::Device, scene: &Scene) {
-        self.upload_scene_with(scene, |contents, label, usage| {
+        self.upload_scene_with(device, scene, |contents, label, usage| {
             device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some(label),
                 contents,
@@ -522,13 +533,14 @@ impl Renderer {
     /// „recursive use of an object …"). Ungemappt + `writeBuffer` wird bei
     /// verlorenem Geraet laut WebGPU-Spezifikation still ignoriert.
     pub fn upload_scene_queued(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, scene: &Scene) {
-        self.upload_scene_with(scene, |contents, label, usage| {
+        self.upload_scene_with(device, scene, |contents, label, usage| {
             buffer_via_queue(device, queue, contents, label, usage)
         });
     }
 
     fn upload_scene_with(
         &mut self,
+        device: &wgpu::Device,
         scene: &Scene,
         make: impl Fn(&[u8], &str, wgpu::BufferUsages) -> wgpu::Buffer,
     ) {
@@ -568,15 +580,107 @@ impl Renderer {
             Some(make(bytemuck::cast_slice(&dash_instances), "dash.instances", wgpu::BufferUsages::VERTEX))
         };
 
+        let (fill_vbo, fill_ibo) = (mk_vbo(&geo.fill_pos, "fill.vbo"), mk_ibo(&geo.fill_idx, "fill.ibo"));
+        let (line_vbo, line_ibo) = (mk_vbo(&geo.line_verts, "line.vbo"), mk_ibo(&geo.line_idx, "line.ibo"));
+
+        // Batch-Werte in Maler-Reihenfolge (ein Block je Eintrag von `draw_sequence`), einmal geschrieben.
+        let stride = self.uniform_stride as usize;
+        let n = geo.draw_sequence.len();
+        let mut blocks = vec![0u8; stride * n.max(1)];
+        for (i, &(kind, idx)) in geo.draw_sequence.iter().enumerate() {
+            let b = match kind {
+                BatchKind::Fill => BatchUniform { color: geo.fill_batches[idx as usize].color, ..Default::default() },
+                BatchKind::Dash => {
+                    let d = &geo.dash_batches[idx as usize];
+                    BatchUniform { color: d.color, stroke_px: d.stroke_mm, width_screen: f32::from(u8::from(d.width_screen)), _pad: [0.0; 2] }
+                }
+                BatchKind::Line => {
+                    let l = &geo.line_batches[idx as usize];
+                    BatchUniform { color: l.color, stroke_px: l.stroke_mm, width_screen: f32::from(u8::from(l.width_screen)), _pad: [0.0; 2] }
+                }
+            };
+            blocks[i * stride..i * stride + std::mem::size_of::<BatchUniform>()].copy_from_slice(bytemuck::bytes_of(&b));
+        }
+        let batch_buffer = make(&blocks, "batch.buffer", wgpu::BufferUsages::UNIFORM);
+        let batch_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("batch.bind"),
+            layout: &self.batch_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &batch_buffer,
+                    offset: 0,
+                    size: wgpu::BufferSize::new(std::mem::size_of::<BatchUniform>() as u64),
+                }),
+            }],
+        });
+
+        // Zeichenfolge als Render-Bundle (Maler-Reihenfolge `draw_sequence`, Fuell- und Linien-Batches
+        // interleaved, Pipeline-/Puffer-Wechsel nur beim Wechsel der Art): nur so deckt eine spaetere Fuellung
+        // einen frueheren Strich ab (SVG-Paritaet). Je Bild nur noch `execute_bundles`.
+        let bundle = (n > 0).then(|| {
+            let mut enc = device.create_render_bundle_encoder(&wgpu::RenderBundleEncoderDescriptor {
+                label: Some("2d.scene.bundle"),
+                color_formats: &[Some(self.format)],
+                depth_stencil: None,
+                sample_count: SAMPLE_COUNT,
+                multiview: None,
+            });
+            enc.set_bind_group(1, &self.frame_bind_group, &[]);
+            let mut bound: Option<BatchKind> = None;
+            for (block, &(kind, idx)) in geo.draw_sequence.iter().enumerate() {
+                let offset = [(block * stride) as u32];
+                match kind {
+                    BatchKind::Fill => {
+                        let (Some(vbo), Some(ibo)) = (&fill_vbo, &fill_ibo) else { continue };
+                        if bound != Some(BatchKind::Fill) {
+                            enc.set_pipeline(&self.fill_pipeline);
+                            enc.set_vertex_buffer(0, vbo.slice(..));
+                            enc.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+                            bound = Some(BatchKind::Fill);
+                        }
+                        let b = &geo.fill_batches[idx as usize];
+                        enc.set_bind_group(0, &batch_bind, &offset);
+                        enc.draw_indexed(b.start_index..b.start_index + b.index_count, 0, 0..1);
+                    }
+                    BatchKind::Dash => {
+                        let Some(vbo) = &dash_vbo else { continue };
+                        if bound != Some(BatchKind::Dash) {
+                            enc.set_pipeline(&self.dash_pipeline);
+                            enc.set_vertex_buffer(0, vbo.slice(..));
+                            bound = Some(BatchKind::Dash);
+                        }
+                        let b = &geo.dash_batches[idx as usize];
+                        enc.set_bind_group(0, &batch_bind, &offset);
+                        enc.draw(0..6, b.start..b.start + b.count);
+                    }
+                    BatchKind::Line => {
+                        let (Some(vbo), Some(ibo)) = (&line_vbo, &line_ibo) else { continue };
+                        if bound != Some(BatchKind::Line) {
+                            enc.set_pipeline(&self.line_pipeline);
+                            enc.set_vertex_buffer(0, vbo.slice(..));
+                            enc.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
+                            bound = Some(BatchKind::Line);
+                        }
+                        let b = &geo.line_batches[idx as usize];
+                        enc.set_bind_group(0, &batch_bind, &offset);
+                        enc.draw_indexed(b.start_index..b.start_index + b.index_count, 0, 0..1);
+                    }
+                }
+            }
+            enc.finish(&wgpu::RenderBundleDescriptor { label: Some("2d.scene.bundle") })
+        });
+
         self.scene = Some(SceneBuffers {
-            fill_vbo: mk_vbo(&geo.fill_pos, "fill.vbo"),
-            fill_ibo: mk_ibo(&geo.fill_idx, "fill.ibo"),
-            line_vbo: mk_vbo(&geo.line_verts, "line.vbo"),
-            line_ibo: mk_ibo(&geo.line_idx, "line.ibo"),
+            _fill_vbo: fill_vbo,
+            _fill_ibo: fill_ibo,
+            _line_vbo: line_vbo,
+            _line_ibo: line_ibo,
             arc_vbo,
             arc_count,
-            dash_vbo,
-            geo,
+            _dash_vbo: dash_vbo,
+            _batch_buffer: batch_buffer,
+            bundle,
         });
         self.text.set_lines(scene.texts.iter().map(GlyphLine::from).collect());
     }
@@ -600,41 +704,6 @@ impl Renderer {
     /// [226] Schriftdateien (`font_key`), die die aktuellen Textzeilen noch brauchen.
     pub fn needed_fonts(&self) -> Vec<u32> {
         self.text.needed_fonts()
-    }
-
-    /// Stellt sicher, dass der dynamische Uniform-Puffer mindestens `count`
-    /// Bloecke fasst; realloziert (Puffer + Bind-Group) bei Bedarf.
-    fn ensure_uniform_capacity(&mut self, device: &wgpu::Device, count: u64) {
-        let need = count.max(1);
-        if let Some(u) = &self.uniform {
-            if u.capacity >= need {
-                return;
-            }
-        }
-        let size = self.uniform_stride * need;
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("globals.buffer"),
-            size,
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("globals.bind"),
-            layout: &self.bind_group_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(std::mem::size_of::<Globals>() as u64),
-                }),
-            }],
-        });
-        self.uniform = Some(UniformArena {
-            buffer,
-            bind_group,
-            capacity: need,
-        });
     }
 
     /// Stellt sicher, dass eine 4x-MSAA-Farbtextur passend zur Ziel-Groesse
@@ -699,56 +768,12 @@ impl Renderer {
             }),
         );
 
-        // Alle Globals-Bloecke in MALER-Reihenfolge (`draw_sequence`, interleaved
-        // Fuell-/Linien-Batches) sammeln, den Puffer einmal schreiben, danach nur
-        // noch dynamisch binden — Reihenfolge identisch zur Draw-Schleife unten.
-        let mut blocks: Vec<Globals> = Vec::new();
-        if let Some(scene) = &self.scene {
-            for &(kind, idx) in &scene.geo.draw_sequence {
-                match kind {
-                    BatchKind::Fill => {
-                        let b = &scene.geo.fill_batches[idx as usize];
-                        blocks.push(Globals {
-                            view_proj: proj,
-                            color: b.color,
-                            viewport_px: [vw, vh],
-                            stroke_px: 0.0,
-                            stroke_scale: mm_px,
-                            ..Globals::default()
-                        });
-                    }
-                    BatchKind::Dash => {
-                        let b = &scene.geo.dash_batches[idx as usize];
-                        blocks.push(Globals {
-                            view_proj: proj,
-                            color: b.color,
-                            viewport_px: [vw, vh],
-                            stroke_px: b.stroke_mm,
-                            stroke_scale: if b.width_screen { px_per_screen } else { mm_px },
-                            dash_scale: if b.width_screen { 1.0 } else { dash_scale },
-                            _pad: [0.0; 3],
-                        });
-                    }
-                    BatchKind::Line => {
-                        let b = &scene.geo.line_batches[idx as usize];
-                        blocks.push(Globals {
-                            view_proj: proj,
-                            color: b.color,
-                            viewport_px: [vw, vh],
-                            stroke_px: b.stroke_mm,
-                            // Schraffur-Striche (`width_screen`) sind an die
-                            // Musterkachel gekoppelt (Bildschirm-Einheiten,
-                            // zoom-skalierend wie der SVG-`<pattern>`-Strich) —
-                            // Geraete-px = Breite * meet-Skala statt * mm->px.
-                            stroke_scale: if b.width_screen { px_per_screen } else { mm_px },
-                            ..Globals::default()
-                        });
-                    }
-                }
-            }
-        }
-
-        self.ensure_uniform_capacity(device, blocks.len() as u64);
+        // Bild-Werte der Szenen-Pipelines (group 1); die Batch-Werte liegen statisch im Bundle.
+        queue.write_buffer(
+            &self.frame_uniform,
+            0,
+            bytemuck::bytes_of(&FrameUniform { view_proj: proj, viewport_px: [vw, vh], mm_px, px_per_screen, dash_scale, _pad: [0.0; 3] }),
+        );
 
         // ── Textpass vorbereiten (echte Glyphen via Atlas, `glyph.rs`) ─────────
         // Pixelgroesse = Papier-mm * mm_px (dieselbe Formel wie die Strich-
@@ -762,20 +787,6 @@ impl Renderer {
                 ((s[0] - cvb.x) * meet, (s[1] - cvb.y) * meet)
             };
             self.text.prepare(device, queue, viewport, place, text_mm_px);
-        }
-
-        // Alle Bloecke in den (auf uniform_stride gepolsterten) Puffer schreiben.
-        if let Some(u) = &self.uniform {
-            let stride = self.uniform_stride as usize;
-            let mut bytes = vec![0u8; stride * blocks.len().max(1)];
-            for (i, g) in blocks.iter().enumerate() {
-                let off = i * stride;
-                bytes[off..off + std::mem::size_of::<Globals>()]
-                    .copy_from_slice(bytemuck::bytes_of(g));
-            }
-            if !blocks.is_empty() {
-                queue.write_buffer(&u.buffer, 0, &bytes);
-            }
         }
 
         // In die 4x-MSAA-Textur zeichnen und in die Surface aufloesen (Resolve):
@@ -805,63 +816,9 @@ impl Renderer {
                 multiview_mask: None,
             });
 
-            if let (Some(scene), Some(u)) = (&self.scene, &self.uniform) {
-                let stride = self.uniform_stride as u32;
-
-                // Geometrie in MALER-Reihenfolge (`draw_sequence`): Fuell- und
-                // Linien-Batches interleaved, Pipeline-/Puffer-Wechsel nur beim
-                // Wechsel der Batch-Art. Nur so deckt eine spaetere Fuellung
-                // einen frueheren Strich ab (SVG-Paritaet, Primitive-Reihenfolge).
-                let mut bound: Option<BatchKind> = None;
-                for (block, &(kind, idx)) in scene.geo.draw_sequence.iter().enumerate() {
-                    match kind {
-                        BatchKind::Fill => {
-                            let (Some(vbo), Some(ibo)) = (&scene.fill_vbo, &scene.fill_ibo)
-                            else {
-                                continue;
-                            };
-                            if bound != Some(BatchKind::Fill) {
-                                pass.set_pipeline(&self.fill_pipeline);
-                                pass.set_vertex_buffer(0, vbo.slice(..));
-                                pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
-                                bound = Some(BatchKind::Fill);
-                            }
-                            let b = &scene.geo.fill_batches[idx as usize];
-                            pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
-                            let start = b.start_index;
-                            pass.draw_indexed(start..start + b.index_count, 0, 0..1);
-                        }
-                        BatchKind::Dash => {
-                            let Some(vbo) = &scene.dash_vbo else {
-                                continue;
-                            };
-                            if bound != Some(BatchKind::Dash) {
-                                pass.set_pipeline(&self.dash_pipeline);
-                                pass.set_vertex_buffer(0, vbo.slice(..));
-                                bound = Some(BatchKind::Dash);
-                            }
-                            let b = &scene.geo.dash_batches[idx as usize];
-                            pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
-                            pass.draw(0..6, b.start..b.start + b.count);
-                        }
-                        BatchKind::Line => {
-                            let (Some(vbo), Some(ibo)) = (&scene.line_vbo, &scene.line_ibo)
-                            else {
-                                continue;
-                            };
-                            if bound != Some(BatchKind::Line) {
-                                pass.set_pipeline(&self.line_pipeline);
-                                pass.set_vertex_buffer(0, vbo.slice(..));
-                                pass.set_index_buffer(ibo.slice(..), wgpu::IndexFormat::Uint32);
-                                bound = Some(BatchKind::Line);
-                            }
-                            let b = &scene.geo.line_batches[idx as usize];
-                            pass.set_bind_group(0, &u.bind_group, &[block as u32 * stride]);
-                            let start = b.start_index;
-                            pass.draw_indexed(start..start + b.index_count, 0, 0..1);
-                        }
-                    }
-                }
+            // Fuellungen, Linien und Striche in Maler-Reihenfolge: das beim Hochladen aufgezeichnete Bundle.
+            if let Some(bundle) = self.scene.as_ref().and_then(|sc| sc.bundle.as_ref()) {
+                pass.execute_bundles(std::iter::once(bundle));
             }
 
             // 3) Analytische Boegen: eigene Pipeline, EIN Frame-Uniform, je Bogen

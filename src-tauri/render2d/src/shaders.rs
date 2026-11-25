@@ -524,3 +524,53 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     return vec4<f32>(globals.color.rgb, a);
 }
 "#;
+
+/// Uniform-Kopf der Szenen-Pipelines (`gpu.rs`, Render-Bundle): die Werte eines Batches (Farbe, Papier-mm-Breite,
+/// Bildschirm-Strich) liegen statisch in group(0) (dynamischer Offset, beim Hochladen EINMAL geschrieben), die Werte
+/// des Bildes (Projektion, Zeichenpuffer, mm→px, px je Einheit, Muster-Massstab) in group(1) (je Bild ein Block).
+/// `gl()` setzt daraus das `Globals` der Vorlagen zusammen — dieselben Rechnungen wie bisher je Batch auf der CPU.
+const SPLIT_UNIFORMS_WGSL: &str = r#"
+struct Batch {
+    color        : vec4<f32>,
+    stroke_px    : f32,
+    width_screen : f32,
+    _p0          : f32,
+    _p1          : f32,
+};
+struct Frame {
+    view_proj     : mat4x4<f32>,
+    viewport_px   : vec2<f32>,
+    mm_px         : f32,
+    px_per_screen : f32,
+    dash_scale    : f32,
+    _p0           : f32,
+    _p1           : f32,
+    _p2           : f32,
+};
+@group(0) @binding(0) var<uniform> batch : Batch;
+@group(1) @binding(0) var<uniform> frame : Frame;
+struct Globals {
+    view_proj    : mat4x4<f32>,
+    color        : vec4<f32>,
+    viewport_px  : vec2<f32>,
+    stroke_px    : f32,
+    stroke_scale : f32,
+    dash_scale   : f32,
+};
+fn gl() -> Globals {
+    let screen = batch.width_screen > 0.5;
+    return Globals(frame.view_proj, batch.color, frame.viewport_px, batch.stroke_px,
+        select(frame.mm_px, frame.px_per_screen, screen), select(frame.dash_scale, 1.0, screen));
+}
+"#;
+
+/// Szenen-Variante einer Vorlage (`FILL_WGSL`, `LINE_WGSL`, `DASH_LINE_WGSL`): ihr `Globals`-Kopf wird durch
+/// [`SPLIT_UNIFORMS_WGSL`] ersetzt, `globals.x` durch `gl().x`. Die Vorlagen selbst bleiben unverändert (der native
+/// Chunk-Renderer `chunks.rs` nutzt sie mit seinem eigenen Ein-Block-Layout). `None`, wenn der Kopf nicht passt.
+pub fn scene_variant(src: &str) -> Option<String> {
+    let start = src.find("struct Globals {")?;
+    let decl = "@group(0) @binding(0) var<uniform> globals : Globals;";
+    let end = src[start..].find(decl)? + start + decl.len();
+    let body = src[end..].replace("globals.", "gl().");
+    (!body.contains("globals")).then(|| format!("{}{SPLIT_UNIFORMS_WGSL}{body}", &src[..start]))
+}

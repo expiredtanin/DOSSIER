@@ -196,7 +196,15 @@ mod tests {
             ("line", super::shaders::LINE_WGSL),
             ("arc", super::shaders::ARC_WGSL),
             ("dash", super::shaders::DASH_LINE_WGSL),
-        ] {
+        ]
+        .into_iter()
+        .map(|(n, s)| (n.to_string(), s.to_string()))
+        // Szenen-Varianten (statische Batch-Werte + Bild-Werte, Render-Bundle in `gpu.rs`).
+        .chain(
+            [("fill", super::shaders::FILL_WGSL), ("line", super::shaders::LINE_WGSL), ("dash", super::shaders::DASH_LINE_WGSL)]
+                .map(|(n, s)| (format!("{n}/szene"), super::shaders::scene_variant(s).unwrap_or_else(|| panic!("{n}: Kopf nicht gefunden")))),
+        ) {
+            let (name, src) = (name.as_str(), src.as_str());
             let module = naga::front::wgsl::parse_str(src)
                 .unwrap_or_else(|e| panic!("{name}: WGSL-Parse-Fehler: {e:?}"));
             let mut validator =
