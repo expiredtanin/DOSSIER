@@ -548,8 +548,7 @@ export interface ResolvedTitleBlock {
  * leere Felder werden aus Projekt/Layout mit sinnvollen Defaults gefüllt
  * (Projektname ← `Project.name`, Blattname ← `Layout.name`, Datum ← `today`).
  * Ohne Master bleibt der Titelblock trotzdem sinnvoll befüllt (nur Defaults).
- * Der `scale`-Default ergibt sich aus dem ERSTEN Viewport des Layouts (falls
- * vorhanden), damit ein Ein-Viewport-Blatt gleich seinen Massstab trägt.
+ * Der `scale`-Default ergibt sich aus den Viewports des Layouts (mehrere Massstäbe: „1:10 / 1:500").
  */
 export function resolveTitleBlock(
   project: Project,
@@ -558,7 +557,7 @@ export function resolveTitleBlock(
   today: string = new Date().toISOString().slice(0, 10),
 ): ResolvedTitleBlock {
   const arg = {
-    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, masterId: layout.masterId, viewports: (layout.viewports ?? []).slice(0, 1) },
+    layout: { id: layout.id, name: layout.name, planNumber: layout.planNumber, masterId: layout.masterId, viewports: layout.viewports ?? [] },
     master: master ? { titleBlock: master.titleBlock } : null,
     today,
   };

@@ -117,14 +117,13 @@ pub struct TitleBlock {
 }
 
 /// Titelblock mit Master-Vererbung (`resolveTitleBlock`): `layout` mit `id`/`name`/`planNumber` und
-/// `viewports` (nur der erste zählt), `master` (`titleBlock`) oder `Null`; `today` = Vorgabe-Datum.
+/// `viewports` (Massstäbe aller Viewports), `master` (`titleBlock`) oder `Null`; `today` = Vorgabe-Datum.
 /// Projekt (Name, Ausschnitte, Layout-Reihenfolge) aus der Wurzel.
 pub fn resolve_title_block(root: &Map<String, Value>, layout: &Value, master: &Value, today: &str) -> TitleBlock {
     let tb = master.get("titleBlock").filter(|v| v.is_object());
     let tb_get = |k: &str| tb.and_then(|t| t.get(k));
-    let first_vp = layout.get("viewports").and_then(Value::as_array).and_then(|a| a.first());
-    // `findSnapshot` (erster Treffer), `resolveViewportScale(vp, snap, 100)`
-    let scale_n: Option<f64> = first_vp.map(|vp| {
+    // `findSnapshot` (erster Treffer), `resolveViewportScale(vp, snap, 100)` je Viewport.
+    let scale_of = |vp: &Value| -> f64 {
         let snap_id = vp.get("snapshotId").and_then(Value::as_str);
         let snap = list(root, "viewSnapshots").iter().find(|s| s.get("id").and_then(Value::as_str) == snap_id && snap_id.is_some());
         vp.get("scaleDenominator")
@@ -132,11 +131,14 @@ pub fn resolve_title_block(root: &Map<String, Value>, layout: &Value, master: &V
             .or_else(|| snap.and_then(|s| s.get("scaleDenominator")).filter(|v| !v.is_null()))
             .and_then(Value::as_f64)
             .unwrap_or(100.0)
-    });
-    let scale_text = match scale_n {
-        Some(n) if n != 0.0 && !n.is_nan() => format!("1:{}", crate::js_fmt::js_number(n)),
-        _ => "—".to_string(),
     };
+    // Blatt mit mehreren Massstäben (Detail 1:10 und Situation 1:500): alle, vom grössten zum kleinsten Massstab
+    // („1:10 / 1:500"), nicht nur der des ersten Viewports.
+    let mut scales: Vec<f64> = layout.get("viewports").and_then(Value::as_array).map(|a| a.iter().map(scale_of).collect()).unwrap_or_default();
+    scales.retain(|n| *n != 0.0 && !n.is_nan());
+    scales.sort_by(f64::total_cmp);
+    scales.dedup();
+    let scale_text = if scales.is_empty() { "—".to_string() } else { scales.iter().map(|n| format!("1:{}", crate::js_fmt::js_number(*n))).collect::<Vec<_>>().join(" / ") };
     // Laufende Plannummer: Position des Layouts in `project.layouts` (1-basiert, zweistellig)
     let layout_id = layout.get("id").and_then(Value::as_str);
     let idx = list(root, "layouts").iter().position(|l| l.get("id").and_then(Value::as_str) == layout_id && layout_id.is_some());
@@ -227,6 +229,9 @@ mod tests {
                 plan_count: 2,
             }
         );
+        // Mehrere Viewports: alle Massstäbe, sortiert, ohne Doppel.
+        let mixed = json!({"id": "l1", "name": "D", "viewports": [{"snapshotId": "s1", "scaleDenominator": 500}, {"snapshotId": "s1"}, {"snapshotId": "s1", "scaleDenominator": 10}, {"snapshotId": "s1", "scaleDenominator": 50}]});
+        assert_eq!(resolve_title_block(&root, &mixed, &Value::Null, "d").scale, "1:10 / 1:50 / 1:500");
         let none = resolve_title_block(&root, &json!({"id": "x", "name": "Y", "viewports": [], "planNumber": " A1 "}), &Value::Null, "d");
         assert_eq!((none.scale.as_str(), none.plan_number.as_str(), none.project_name.as_str()), ("—", "A1", "Haus"));
     }
