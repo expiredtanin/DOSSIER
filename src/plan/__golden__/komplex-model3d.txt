@@ -5,11 +5,10 @@ meshes[].indices [108] x6
 meshes[].indices [1140]
 meshes[].indices [1152] x3
 meshes[].indices [1224] x2
-meshes[].indices [1236]
-meshes[].indices [1248] x3
+meshes[].indices [1248] x4
 meshes[].indices [1284] x2
 meshes[].indices [12960]
-meshes[].indices [1380]
+meshes[].indices [1374]
 meshes[].indices [144] x55
 meshes[].indices [15264]
 meshes[].indices [1584]
@@ -22,15 +21,15 @@ meshes[].indices [1860]
 meshes[].indices [1884]
 meshes[].indices [1896]
 meshes[].indices [1962]
-meshes[].indices [2004]
-meshes[].indices [2040]
+meshes[].indices [2010]
 meshes[].indices [204]
-meshes[].indices [2184] x2
+meshes[].indices [2064]
+meshes[].indices [2196]
+meshes[].indices [2208]
 meshes[].indices [2262]
 meshes[].indices [2376]
 meshes[].indices [2496]
-meshes[].indices [2556]
-meshes[].indices [2580]
+meshes[].indices [2580] x2
 meshes[].indices [300] x3
 meshes[].indices [31104]
 meshes[].indices [312]
@@ -38,12 +37,12 @@ meshes[].indices [348] x6
 meshes[].indices [36] x1013
 meshes[].indices [396]
 meshes[].indices [4092]
-meshes[].indices [4812] x2
-meshes[].indices [4860] x3
-meshes[].indices [4872]
+meshes[].indices [4824] x2
+meshes[].indices [4872] x3
+meshes[].indices [4884]
 meshes[].indices [492]
-meshes[].indices [5160]
-meshes[].indices [5166]
+meshes[].indices [5184]
+meshes[].indices [5220]
 meshes[].indices [5412] x4
 meshes[].indices [564] x4
 meshes[].indices [60] x9
@@ -52,25 +51,25 @@ meshes[].indices [648]
 meshes[].indices [672]
 meshes[].indices [72]
 meshes[].indices [7632]
-meshes[].indices [7728]
+meshes[].indices [7740]
 meshes[].indices [8280] x2
 meshes[].indices [84] x2
 meshes[].indices [912]
+meshes[].indices [924]
 meshes[].indices [9288]
-meshes[].indices [930]
 meshes[].indices [948] x2
 meshes[].indices [96] x6
-meshes[].positions [1008]
-meshes[].positions [1014]
+meshes[].positions [1011]
+meshes[].positions [1026]
 meshes[].positions [1044] x6
 meshes[].positions [108] x30
-meshes[].positions [1092] x2
+meshes[].positions [1098]
+meshes[].positions [1104]
 meshes[].positions [1131]
 meshes[].positions [1188]
 meshes[].positions [120]
 meshes[].positions [1260]
-meshes[].positions [1278]
-meshes[].positions [1290]
+meshes[].positions [1290] x2
 meshes[].positions [132]
 meshes[].positions [156] x3
 meshes[].positions [162]
@@ -80,33 +79,34 @@ meshes[].positions [1890] x3
 meshes[].positions [2040]
 meshes[].positions [216]
 meshes[].positions [234]
-meshes[].positions [2412] x2
-meshes[].positions [2430] x3
-meshes[].positions [2436]
+meshes[].positions [2418] x2
+meshes[].positions [2436] x3
+meshes[].positions [2442]
 meshes[].positions [24] x981
 meshes[].positions [252] x2
-meshes[].positions [2580]
-meshes[].positions [2583]
+meshes[].positions [2592]
+meshes[].positions [2610]
 meshes[].positions [264]
 meshes[].positions [2706] x4
 meshes[].positions [288] x10
 meshes[].positions [300]
 meshes[].positions [324] x7
 meshes[].positions [342]
-meshes[].positions [3876]
+meshes[].positions [3882]
 meshes[].positions [4128]
 meshes[].positions [4146] x2
 meshes[].positions [456]
-meshes[].positions [471]
+meshes[].positions [468]
 meshes[].positions [4746]
 meshes[].positions [474] x2
 meshes[].positions [534]
 meshes[].positions [576] x4
 meshes[].positions [612]
-meshes[].positions [618] x2
+meshes[].positions [618]
+meshes[].positions [624]
 meshes[].positions [636]
 meshes[].positions [648]
-meshes[].positions [684]
+meshes[].positions [681]
 meshes[].positions [7050]
 meshes[].positions [72] x2
 meshes[].positions [7650]
@@ -150,4 +150,4 @@ walls[].start [2] x439
 walls[].startCut [4] x270
 walls[].topDrop [2] x22
 walls[].topPlane [3] x22
-hash 2eaf9e72506e49c1
+hash 66380900b6ca3d0c

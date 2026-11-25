@@ -386,6 +386,20 @@ impl Solid {
         Self::checked(self.0.intersection_with_engine(&o.0, BooleanEngine::Exact))
     }
 
+    /// Vereinigung vieler Körper in EINEM Schritt (Manifold-Sammel-Vereinigung `CsgNode::op_n(Add)`, Engine `Exact`
+    /// wie [`Solid::union`]): Körper mit getrennten Ausdehnungen werden nur zusammengesetzt, die übrigen paarweise in
+    /// Heap-Reihenfolge verknüpft — statt n−1 einzelner Booleans mit wachsendem Zwischenergebnis. Deterministisch
+    /// (Manifold ohne `parallel`).
+    pub fn union_many(parts: Vec<Solid>) -> Result<Solid, String> {
+        use manifold_rust::csg_tree::CsgNode;
+        let mut parts: Vec<Solid> = parts.into_iter().filter(|s| !s.is_empty()).collect();
+        if parts.len() <= 1 {
+            return Ok(parts.pop().unwrap_or_else(Solid::empty));
+        }
+        let leaves = parts.into_iter().map(|s| CsgNode::leaf(s.0.into_impl())).collect();
+        Self::checked(Manifold::from_impl(CsgNode::op_n(manifold_rust::types::OpType::Add, leaves).evaluate()))
+    }
+
     /// Vereinigung vieler Körper (ungültige Teile werden übergangen und gezählt).
     pub fn union_all(meshes: &[Mesh]) -> (Solid, usize) {
         let mut acc = Solid::empty();

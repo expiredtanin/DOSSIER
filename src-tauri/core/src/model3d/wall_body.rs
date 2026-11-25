@@ -180,7 +180,7 @@ fn band_solid(pieces: &[&RWall], arc: bool) -> Option<Solid> {
     };
     let is_side = |q: &RWall| q.top_plane.is_none() && (lateral_range(main, q) != main_range || inside(q));
     let (side, band): (Vec<&RWall>, Vec<&RWall>) = pieces.iter().copied().partition(|q| is_side(q));
-    let mut acc = Solid::empty();
+    let mut parts = Vec::new();
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     // Band ganz ohne Dachebene: wie vor [231] um LAP vergrössert (die Aussenfläche liegt 0,1 mm vor anderen Bauteilen in
     // derselben Ebene, z. B. Kniestock darüber — sonst verwechselt die Kantenerkennung im 3D deren Ecken: gestrichelte
@@ -194,7 +194,13 @@ fn band_solid(pieces: &[&RWall], arc: bool) -> Option<Solid> {
                 hi[k] = hi[k].max(b[k]);
             }
         }
-        acc = acc.union(&piece_solid(&m, arc)?).ok()?;
+        parts.push(piece_solid(&m, arc)?);
+    }
+    // Schrittweise (nicht `union_many`): Stücke, die sich nur berühren, sollen zu EINEM Körper verschmelzen; die
+    // Sammel-Vereinigung setzt sie nur zusammen (Fugen bleiben, Test `toWalls3d.giebel`).
+    let mut acc = Solid::empty();
+    for s in &parts {
+        acc = acc.union(s).ok()?;
     }
     // Kleine, gleichförmige Dreiecke: ein Loch in der grossen Wandfläche soll keine langen Dreiecke bis in die Ecken der
     // Fläche ziehen (deren Normalen sind für die Kantenerkennung zu ungenau: gestrichelte Scheinkanten).
@@ -202,19 +208,30 @@ fn band_solid(pieces: &[&RWall], arc: bool) -> Option<Solid> {
     if !arc && !acc.is_empty() {
         acc = acc.refined(((longest / CELL).ceil() as i32).clamp(1, 10));
     }
+    // Leistung: die kleinen Körper (Löcher per Sammel-Vereinigung, Leibungsstücke schrittweise) erst unter sich, dann EINE
+    // Operation mit dem (verfeinerten, grossen) Bandkörper — A − h₁ − h₂ = A − (h₁ ∪ h₂), A ∪ s₁ ∪ s₂ = A ∪ (s₁ ∪ s₂).
+    // Vorher lief jeder Abzug und jede Vereinigung einzeln über den ganzen Bandkörper (Giebelwand mit 3 Löchern und 13
+    // Leibungsstücken: 16 grosse Booleans; im Grossgebäude zwei Drittel der 3D-Ableitung).
+    let mut cut = Vec::new();
     for q in &band {
         for b in hole_boxes(q, EDGE) {
-            acc = acc.difference(&Solid::new(&b).ok()?).ok()?;
+            cut.push(Solid::new(&b).ok()?);
         }
     }
+    acc = acc.difference(&Solid::union_many(cut).ok()?).ok()?;
+    let mut sides = Vec::new();
     for q in &side {
         let Some(m) = wall_piece_mesh(&inflated(q)) else { continue };
-        let mut s = piece_solid(&m, arc)?;
-        for b in hole_boxes(q, OVER) {
-            s = s.difference(&Solid::new(&b).ok()?).ok()?;
-        }
-        acc = acc.union(&s).ok()?;
+        let s = piece_solid(&m, arc)?;
+        let own = hole_boxes(q, OVER).iter().map(Solid::new).collect::<Result<Vec<_>, _>>().ok()?;
+        sides.push(s.difference(&Solid::union_many(own).ok()?).ok()?);
     }
+    // Leibungsstücke schrittweise unter sich (verschmelzen, s. oben), dann EINE Vereinigung mit dem Bandkörper.
+    let mut joined = Solid::empty();
+    for s in &sides {
+        joined = joined.union(s).ok()?;
+    }
+    acc = acc.union(&joined).ok()?;
     (!acc.is_empty()).then_some(acc)
 }
 
@@ -310,6 +327,8 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
             continue;
         }
         let Some(mut solid) = band_solid(&pieces, arc) else { continue };
+        // Schneidkörper des Bandes erst vereinigen, dann EIN Abzug (wie in `band_solid`).
+        let mut cutters = Vec::new();
         let mut ok = true;
         for c in &cuts {
             let s = c.shift[band];
@@ -319,12 +338,18 @@ pub(crate) fn attach_bodies(p: &Project, wall: &Wall, shaped: &[&Opening], plain
                 (Some(a), Some(z)) => Solid::new(&chord_prism(&a, z, &ring, c.from, c.bottom, lat)),
                 (Some(a), None) => bent_prism(&a, &ring, c.from, c.bottom, lat),
             };
-            match cutter.and_then(|cut| solid.difference(&cut)) {
-                Ok(r) => solid = r,
+            match cutter {
+                Ok(cut) => cutters.push(cut),
                 Err(_) => {
                     ok = false;
                     break;
                 }
+            }
+        }
+        if ok {
+            match Solid::union_many(cutters).and_then(|cut| solid.difference(&cut)) {
+                Ok(r) => solid = r,
+                Err(_) => ok = false,
             }
         }
         if !ok || solid.is_empty() {
