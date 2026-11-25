@@ -786,24 +786,21 @@ fn cells_over(poly: &[V2], u: V2, v: V2, cell: f64) -> Option<(f64, f64, f64, f6
     (n.is_finite() && n <= 250_000.0 && cell > 1e-9).then_some((i0, i1, j0, j1))
 }
 
-/// Erdreich: Flechtmuster — je Zelle drei kurze parallele Striche, von Zelle zu Zelle um 90°
-/// gewechselt (mit dem Schraffurwinkel gedreht, Standard 45°). Zelle 0.15 m · scale.
+/// Erdreich (SIA 400, Vorlage Maintainer 25.11.): Flechtmuster — quadratische Felder, je Feld vier parallele Striche
+/// über die ganze Feldbreite, von Feld zu Feld um 90° gewechselt (Schachbrett), das Ganze im Schraffurwinkel gedreht
+/// (Standard 45°). Felder dicht an dicht, ohne Rand. Feld 0.25 m · scale (lesbar: bei 1:50 5 mm, Striche 1.25 mm).
 fn earth_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     let rot = to_model_angle_rad(hatch.angle);
     let (u, v) = (rotate(v2(1.0, 0.0), rot), rotate(v2(0.0, 1.0), rot));
-    let cell = 0.15 * scale;
+    let cell = 0.25 * scale;
     let Some((i0, i1, j0, j1)) = cells_over(poly, u, v, cell) else { return Vec::new() };
     let at = |a: f64, b: f64| v2(u.x * a + v.x * b, u.y * a + v.y * b);
     let mut runs = Vec::new();
     for j in fseq(j0, j1) {
         for i in fseq(i0, i1) {
             let along_u = (i + j).rem_euclid(2.0) == 0.0;
-            for k in [0.25, 0.5, 0.75] {
-                let (a, b) = if along_u {
-                    (at((i + 0.15) * cell, (j + k) * cell), at((i + 0.85) * cell, (j + k) * cell))
-                } else {
-                    (at((i + k) * cell, (j + 0.15) * cell), at((i + k) * cell, (j + 0.85) * cell))
-                };
+            for k in [0.125, 0.375, 0.625, 0.875] {
+                let (a, b) = if along_u { (at(i * cell, (j + k) * cell), at((i + 1.0) * cell, (j + k) * cell)) } else { (at((i + k) * cell, j * cell), at((i + k) * cell, (j + 1.0) * cell)) };
                 for (sa, sb) in clip_segment_to_polygon(a, b, poly) {
                     runs.push(vec![sa, sb]);
                 }
@@ -813,8 +810,9 @@ fn earth_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     runs
 }
 
-/// Kies: kleine Kreise (Ø 25–55 % der Zelle) auf gestreutem Raster, modellraum-stabil.
-/// Zelle 0.05 m · scale.
+/// Kies ([331]): gerundete Kiesel verschiedener Grösse und Form (Ellipsen mit zufälligen Achsen und Drehung) auf
+/// gestreutem Raster, dazwischen einzelne kleine Punkte — dichter und unregelmässiger als die früheren gleich grossen
+/// Kreise. Zelle 0.05 m · scale, modellraum-stabil (Zufall je Zelle).
 fn gravel_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     let cell = 0.05 * scale;
     let Some((i0, i1, j0, j1)) = cells_over(poly, v2(1.0, 0.0), v2(0.0, 1.0), cell) else { return Vec::new() };
@@ -823,13 +821,31 @@ fn gravel_runs(poly: &[V2], hatch: &Hatch, scale: f64) -> Vec<Run> {
     for j in fseq(j0, j1) {
         for i in fseq(i0, i1) {
             let mut rnd = Mulberry32 { a: hash_cell(i, j, seed) };
-            let r = cell * (0.125 + 0.15 * rnd.next());
-            let cx = (i + 0.5) * cell + (rnd.next() - 0.5) * (cell - 2.0 * r);
-            let cy = (j + 0.5) * cell + (rnd.next() - 0.5) * (cell - 2.0 * r);
-            let ring: Vec<V2> = (0..=12).map(|k| {
-                let a = k as f64 * PI / 6.0;
-                v2(cx + r * jsnum::cos(a), cy + r * jsnum::sin(a))
-            }).collect();
+            let kind = rnd.next();
+            if kind < 0.2 {
+                // Feinkorn: ein Punkt (kurzer Strich).
+                let (cx, cy) = ((i + 0.2 + 0.6 * rnd.next()) * cell, (j + 0.2 + 0.6 * rnd.next()) * cell);
+                let h = cell * 0.04;
+                for (sa, sb) in clip_segment_to_polygon(v2(cx - h, cy), v2(cx + h, cy), poly) {
+                    runs.push(vec![sa, sb]);
+                }
+                continue;
+            }
+            // Kiesel: Halbachsen 15–40 % der Zelle, Verhältnis bis 1.6, beliebig gedreht.
+            let ra = cell * (0.15 + 0.25 * rnd.next());
+            let rb = ra * (0.6 + 0.4 * rnd.next());
+            let rot = rnd.next() * PI;
+            let room = (cell / 2.0 - ra).max(0.0);
+            let cx = (i + 0.5) * cell + (rnd.next() - 0.5) * 2.0 * room;
+            let cy = (j + 0.5) * cell + (rnd.next() - 0.5) * 2.0 * room;
+            let (c, s) = (jsnum::cos(rot), jsnum::sin(rot));
+            let ring: Vec<V2> = (0..=12)
+                .map(|k| {
+                    let t = k as f64 * PI / 6.0;
+                    let (x, y) = (ra * jsnum::cos(t), rb * jsnum::sin(t));
+                    v2(cx + c * x - s * y, cy + s * x + c * y)
+                })
+                .collect();
             runs.extend(clip_polyline_to_polygon(&ring, poly));
         }
     }

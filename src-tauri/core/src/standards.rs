@@ -133,7 +133,7 @@ pub fn hatches() -> Vec<Value> {
         lines("std-h-glas", "SIA Glas", "diagonal", 0.008, 90.0, true, 0.1, ""),
         // Fig. 34 Sperrschichten (Wind, Dampf, Wasser): kräftige Strichlinie schwarz/weiss.
         layer("std-h-sperrschicht", "SIA Sperrschicht", "barrier", 1.0, 0.5),
-        // Erdreich, Kies: in SIA 400 ohne Sinnbild (B.3.3 nur Terrainlinien) — Konvention.
+        // Erdreich: Flechtmuster nach SIA 400 (Vorlage Maintainer 25.11.); Kies: Kiesel ([331]).
         lines("std-h-erdreich", "SIA Erdreich", "earth", 0.0889, 45.0, false, 0.1, ""),
         lines("std-h-kies", "SIA Kies / Sauberkeitsschicht", "gravel", 0.0889, 0.0, false, 0.1, ""),
     ]

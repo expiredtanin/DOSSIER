@@ -450,6 +450,9 @@ pub fn section_primitives_mv(out: &Output, mono: bool, hidden_lines: bool, vis: 
                 Some(_) => rules.terrain_hatch.clone().unwrap_or_else(|| hatch.clone()),
             };
             let hatch = if mono { HatchRender { color: SECTION_INK.into(), ..hatch } } else { hatch };
+            // [331] Erdreich-Sinnbild auf dem Papier gleich dicht: bis 1:50 wie definiert, darüber im Verhältnis weiter
+            // (sonst bei 1:100 doppelt so dicht und grau). Nur die Muster Erdreich/Kies; eigene Regel-Schraffuren bleiben.
+            let hatch = if matches!(hatch.pattern, HatchPattern::Earth | HatchPattern::Gravel) && scale > 50.0 { HatchRender { scale: hatch.scale * scale / 50.0, ..hatch } } else { hatch };
             let fill = tov.and_then(|(_, l)| l.fill_color.as_deref()).unwrap_or("none");
             let mut q = polygon(ring.iter().map(|q| v2(q[0], q[1])).collect(), fill, "none", 0.0, hatch);
             if let Primitive::Polygon { context_object_id, .. } = &mut q {
