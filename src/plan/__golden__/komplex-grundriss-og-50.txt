@@ -1,4 +1,4 @@
-viewBox -12.974 0 37.808 33.406
+viewBox -11.974 0 34.808 33.406
 bytes 353703
 circle 15
 g 1
@@ -10,4 +10,4 @@ rect 1
 svg 1
 text 81
 tspan 18
-hash 1197a476e1d92d19
+hash 3924d0c4ff13e708

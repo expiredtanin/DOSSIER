@@ -106,9 +106,9 @@ const LEVELS: DrawingLevel[] = [
   { id: "schnitt-b", name: "Schnitt B-B", kind: "section", visible: true, locked: false, linePoints: [P(-9, 5.6), P(20, 5.6)], directionSign: 1, levelMarks: true, templateId: "vt-schnitt" },
   // Ansichten: Linie so, dass die Blickrichtung (linke Normale der Linie) zum Haus zeigt.
   { id: "ansicht-sued", name: "Ansicht Süd", kind: "elevation", visible: true, locked: false, linePoints: [P(-9, -10), P(20, -10)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
-  { id: "ansicht-ost", name: "Ansicht Ost", kind: "elevation", visible: true, locked: false, linePoints: [P(24, -6), P(24, 20)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
+  { id: "ansicht-ost", name: "Ansicht Ost", kind: "elevation", visible: true, locked: false, linePoints: [P(22, -6), P(22, 20)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
   { id: "ansicht-nord", name: "Ansicht Nord", kind: "elevation", visible: true, locked: false, linePoints: [P(20, 22), P(-9, 22)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
-  { id: "ansicht-west", name: "Ansicht West", kind: "elevation", visible: true, locked: false, linePoints: [P(-12, 20), P(-12, -6)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
+  { id: "ansicht-west", name: "Ansicht West", kind: "elevation", visible: true, locked: false, linePoints: [P(-11, 20), P(-11, -6)], directionSign: 1, shadows: true, levelMarks: true, templateId: "vt-ansicht" },
   // 2D-Detail (Zeichnungsebene, Massstab 1:10 auf dem Detailblatt).
   { id: "detail-traufe", name: "Detail Deckenauflager 1:10", kind: "drawing", visible: true, locked: false },
 ];
@@ -628,8 +628,8 @@ function annotations(): Drawing2D[] {
 
   // Text mit Formatierung, Hinweis mit Führungslinie, Detailverweis, Massstabsleiste, Revisionswolke.
   add("titel-eg", "eg", "50", {
-    shape: "text", at: P(-14, -9.5), text: "Erdgeschoss", height: 0.7, angle: 0, width: 16,
-    doc: textDoc([{ text: "Musterhaus komplex — Erdgeschoss", bold: true, sizePt: 14 }, { text: "Zweifamilienhaus am Südhang, Wohnung 1 (EG/UG) und Maisonette (OG/DG)", italic: true }]),
+    shape: "text", at: P(-2, -11.2), text: "Erdgeschoss", height: 0.7, angle: 0, width: 16,
+    doc: textDoc([{ text: "Musterhaus komplex — Erdgeschoss", bold: true }, { text: "Zweifamilienhaus am Südhang, Wohnung 1 (EG/UG) und Maisonette (OG/DG)", italic: true }]),
   });
   // [269] Hinweis nah am Bauteil: einzeilig im Wohnraum über der Hebeschiebetür (Mitte x = 8.5), kurze
   // Führungslinie zur Schwelle. Vorher stand er 4.5 m südlich unter den Massketten, die Führungslinie querte beide.
@@ -639,8 +639,9 @@ function annotations(): Drawing2D[] {
   }, { endMarks: { end: "arrow", sizeMm: 2 } });
   // [157] Detailverweis ausserhalb der Massketten (vorher „Detail und Situation“ auf Masskette/Höhenkote).
   add("detailref-1", "eg", "50", { shape: "detailref", at: P(-9, -2.6), label: "1", sheetLayoutId: "lay-501", sheetLabel: "501" });
-  // [269] Titel und Massstabsbalken rücken näher ans Haus (vorher 16 bzw. 19 m darunter: ein halbes Blatt leer).
-  add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-14, -12), segmentLength: 1, segments: 5 });
+  // [269] Titel und Massstabsbalken rücken näher ans Haus (vorher 16 bzw. 19 m darunter: ein halbes Blatt leer);
+  // unter dem Haus statt links aussen, sonst sprengt der Grundriss den Viewport auf Blatt 101 (37 m bei 1:100).
+  add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-2, -14), segmentLength: 1, segments: 5 });
   // Revisionswolke (Bögen nach aussen: negativer Bulge bei Gegenuhrzeigersinn).
   const cloud = [...arcPts(P(12.6, 0), 1.9, -Math.PI, Math.PI, 18).slice(0, 18)].map((q) => P(q.x, r3(q.y * 0.6)));
   add("revision-a", "eg", "90", { shape: "polyline", closed: true, pts: cloud, bulge: cloud.map(() => -0.45) }, { color: "#c0392b", weightMm: 0.35 });
@@ -741,8 +742,8 @@ const KATASTER_VISIBLE: Record<string, boolean> = { "17": true };
 /** [207] Klassen, die die Ansichtsvorlage „Situation WBW" ausblendet (`standards.rs::SITUATION_HIDDEN`; Test `sampleProjectComplex.situation.test.ts`). */
 const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", "50", "60", "80", "81", "82", "85", "90", "91", "92", "99"];
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
-/** Grundrisse auf Blättern: ohne Kataster, Strasse, Höhenlinien und Gelände. */
-const PLAN_VIS = vis(["01", "02", "10", "11", "13", "14"]);
+/** Grundrisse auf Blättern: ohne Kataster, Strasse, Nachbarhäuser (12), Höhenlinien und Gelände. */
+const PLAN_VIS = vis(["01", "02", "10", "11", "12", "13", "14"]);
 /** Kontext (Gelände, Baugrube, Höhenlinien, Kataster, Raster, Nachbargebäude) aus — für das Detail (sonst rechnet
  *  der Viewport mit den Nachbarhäusern und das Detail fällt aus dem Rahmen). */
 const HIDE_SITE = vis(["00", "01", "02", "07", "10", "11", "12", "13", "14"]);
@@ -753,7 +754,12 @@ const pxPerMeterAt = (scale: number) => Math.round((96 / 25.4) * 1000 / scale * 
 const snap = (id: string, name: string, level: string, scale: number, center: Vec2, extra: Partial<NonNullable<Project["viewSnapshots"]>[number]> = {}) => ({
   id, name, viewType: "grundriss" as const, view3d: "iso" as const, scaleDenominator: scale, detail: (scale <= 50 ? "fein" : "mittel") as "fein" | "mittel",
   activeLevelId: level, layerVisibility: PLAN_VIS, drawingVisibility: LEVEL_VIS, cameraCenter: center, cameraPxPerMeter: pxPerMeterAt(scale), ...extra,
+  // Verknüpfte Vorlage: ihre Klassen-Schalter stehen im Ausschnitt (wie `applyToSnapshotOps`), sonst zeigte das Blatt
+  // z. B. den Sonnenschatten, den „Grundriss 1:100" ausblendet.
+  ...(extra.templateLinked && extra.templateId && TEMPLATE_VIS[extra.templateId] ? { layerVisibility: { ...(extra.layerVisibility ?? PLAN_VIS), ...TEMPLATE_VIS[extra.templateId] } } : {}),
 });
+/** Klassen-Schalter der Ansichtsvorlagen (`viewTemplates` unten), für verknüpfte Ausschnitte. */
+const TEMPLATE_VIS: Record<string, Record<string, boolean>> = { "vt-gr100": NO_SUN_CAMERA, "vt-gr50": NO_SUN_CAMERA, "vt-brand": NO_SUN_CAMERA };
 
 function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapshotFolders" | "layouts" | "masterLayouts" | "layoutFolders" | "publishSets" | "overrideRules"> {
   return {

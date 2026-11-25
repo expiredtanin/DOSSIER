@@ -1954,8 +1954,12 @@ fn acc_bounds(g: &Drawing2DGeom, b: &mut Bounds, scale: f64) {
             }
         }
         G::Scalebar { at, segment_length, segments } => {
-            acc(at);
-            acc(&v(at.x + segment_length * segments, at.y));
+            // Balken oberhalb, Striche und Zahlen (Grundlinie samt Unterlänge, „…m" hinter dem Ende) unterhalb von `at`:
+            // sonst schnitt der Viewport-Rahmen die Zahlen ab.
+            let len = segment_length * segments.min(MAX_SCALEBAR_SEGMENTS);
+            let (bar_h, tick, text_h) = (mm_to_model(SCALEBAR_HEIGHT_MM, scale), mm_to_model(SCALEBAR_TICK_MM, scale), mm_to_model(SCALEBAR_TEXT_MM, scale));
+            acc(&v(at.x, at.y + bar_h));
+            acc(&v(at.x + len + 3.0 * text_h, at.y - tick - 1.5 * text_h));
         }
         G::Xline { .. } | G::Ray { .. } | G::Block { .. } | G::Libobj { .. } => {}
     }
@@ -2867,6 +2871,12 @@ mod tests {
         let r = g.get().unwrap();
         let d = crate::grid::bubble_diameter(None, 200.0);
         assert!(r[3] >= 4.0 + d - 1e-9 && r[0] <= -d + 1e-9, "{r:?} d={d}");
+        // Massstabsbalken: Zahlen unter dem Balken (3 mm Papier + Strich) zählen mit.
+        let bar: Drawing2DGeom = serde_json::from_value(serde_json::json!({"shape": "scalebar", "at": {"x": 0.0, "y": 0.0}, "segmentLength": 1.0, "segments": 5.0})).unwrap();
+        let mut sb = Bounds::new();
+        acc_bounds(&bar, &mut sb, 100.0);
+        let r = sb.get().unwrap();
+        assert!(r[1] <= -(mm_to_model(1.0, 100.0) + 1.2 * mm_to_model(3.0, 100.0)) && r[3] >= mm_to_model(1.5, 100.0) - 1e-9 && r[2] > 5.0, "{r:?}");
     }
     use crate::plan::domains::PlanArgs;
 

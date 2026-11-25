@@ -134,3 +134,17 @@ describe("Musterhaus komplex", () => {
     }
   });
 });
+
+describe("Musterhaus komplex: verknüpfte Ansichtsvorlagen", () => {
+  // Blatt 101 zeigte den Sonnenschatten, obwohl die verknüpfte Vorlage „Grundriss 1:100" ihn ausblendet: die Klassen-
+  // Schalter der Vorlage müssen im Ausschnitt stehen (wie nach `applyToSnapshotOps`).
+  it("Ausschnitte tragen die Klassen-Schalter ihrer verknüpften Vorlage", () => {
+    const p = buildComplexSampleProject();
+    const linked = (p.viewSnapshots ?? []).filter((s) => s.templateLinked && s.templateId);
+    expect(linked.length).toBeGreaterThan(0);
+    for (const s of linked) {
+      const t = p.viewTemplates!.find((x) => x.id === s.templateId)!;
+      for (const [code, on] of Object.entries(t.layerVisibility ?? {})) expect(s.layerVisibility[code], `${s.id} Klasse ${code}`).toBe(on);
+    }
+  });
+});
