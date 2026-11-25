@@ -40,8 +40,9 @@ test("Reiter: mehrere aus einem Ausschnitt, schliessen behält den Ausschnitt", 
   await expect(tabs).toHaveCount(3);
   await expect(await snapshotRow(page, "EG 1:100")).toBeVisible();
 
-  // „+" öffnet einen weiteren Reiter mit der aktuellen Ansicht (kein Ausschnitt).
-  await drawingTabs(page).getByRole("button", { name: "Neuer Reiter mit der aktuellen Ansicht" }).click();
+  // „+" → „Kopie dieses Reiters" öffnet einen weiteren Reiter mit der aktuellen Ansicht (kein Ausschnitt, [329]).
+  await drawingTabs(page).getByRole("button", { name: "Neuer Reiter …" }).click();
+  await page.getByRole("menu").getByRole("menuitem", { name: "Kopie dieses Reiters" }).click();
   await expect(tabs).toHaveCount(4);
 
   // Ausschnitt im Panel löschen: sein Reiter bleibt offen, heisst weiter so und lässt sich wählen.
