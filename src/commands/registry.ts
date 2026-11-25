@@ -62,6 +62,7 @@ import { copyCommand } from "./cmds/copy";
 import { arrayCommand } from "./cmds/array";
 import { offsetCommand } from "./cmds/offset";
 import { extrudeCommand } from "./cmds/extrude";
+import { contourLineCommand } from "./cmds/contourLine";
 import { revolveCommand } from "./cmds/revolve";
 import { loftCommand } from "./cmds/loft";
 import { trimCommand } from "./cmds/trim";
@@ -155,6 +156,7 @@ export const COMMANDS: Record<string, Command> = {
   array: arrayCommand,
   offset: offsetCommand,
   extrude: extrudeCommand,
+  contourline: contourLineCommand,
   revolve: revolveCommand,
   loft: loftCommand,
   trim: trimCommand,
@@ -344,6 +346,9 @@ export const ALIASES: Record<string, string> = {
   parallel: "multiline",
   imp: "import",
   ter: "terrain",
+  hl: "contourline",
+  hoehenlinie: "contourline",
+  höhenlinie: "contourline",
   baugrube: "excavation",
   aushub: "excavation",
   netzzuschnitt: "meshcrop",

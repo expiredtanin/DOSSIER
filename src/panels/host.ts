@@ -638,6 +638,8 @@ export interface PanelHostValue {
   onPatchContextObject: (id: string, patch: Record<string, unknown>, coalesceKey?: string) => void;
   /** [68] Startet den Befehl „Baugrube" (Umriss zeichnen). */
   onStartExcavation: () => void;
+  /** [332] Startet den Befehl „Höhenlinie" (gezeichnete Linien mit Höhe zu Gelände-Höhenlinien). */
+  onStartContourLine: () => void;
   /**
    * Setzt/ersetzt den Georeferenzierungs-Bezug (`Project.geoAnchor`) — welcher
    * Modell-Punkt welcher realen LV95-Koordinate entspricht. `undefined` löscht

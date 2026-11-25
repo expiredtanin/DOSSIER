@@ -19,6 +19,7 @@ export function buildSiteHost(c: FlatHostOpts) {
     onGenerateTerrain: generateTerrain,
     onPatchContextObject: patchContextObject,
     onStartExcavation: () => onRunCommand("excavation"),
+    onStartContourLine: () => onRunCommand("contourline"),
     onSetGeoAnchor: (anchor) => {
       applyChange((p) => setFieldIfChanged(p, "geoAnchor", anchor));
     },

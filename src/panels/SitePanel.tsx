@@ -82,6 +82,9 @@ export function SitePanel() {
         >
           {t("site.setGeoref")}
         </button>
+        <button type="button" className="site-btn" title={t("site.contourLine.hint")} onClick={() => host.onStartContourLine()}>
+          {t("site.contourLine.draw")}
+        </button>
       </div>
 
       {ctxImportOpen && (

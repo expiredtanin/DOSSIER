@@ -1335,6 +1335,8 @@ pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Vec<Op>>
         "railing" => railing_ops(p, v, &ctx, ids),
         "circlesToTrees" => circles_to_trees_ops(root, p, v, &ctx, ids),
         "extrude" => extrude_ops(root, v, &ctx, ids),
+        // [332] Gezeichnete Linie → Gelände-Höhenlinie.
+        "contourLine" => crate::contour_draw::ops(root, p, v, &ctx, ids),
         // [222] Volumenstudie → Bauteile.
         "solidToParts" => crate::cmd_massing::ops(root, p, v, &ctx, ids),
         _ => return crate::cmd_draw::ops(root, p, v, &ctx, ids).or_else(|| crate::cmd_solid::ops(root, p, v, &ctx, ids)),
@@ -1471,6 +1473,9 @@ pub fn query(root: &Map<String, Value>, p: &Project, v: &Value) -> Option<Result
         "solidToParts" => crate::cmd_massing::check(p, v),
         "pickProfile" => json!({ "hit": pick_profile(root, level, at).map_or(Value::Null, profile_json) }),
         "profile" => json!({ "hit": find(root, "drawings2d", s_of(v, "id")).map_or(Value::Null, profile_json) }),
+        // [332] Linie für eine Höhenlinie: angeklickt bzw. vorgewählt.
+        "pickContourLine" => json!({ "hit": crate::contour_draw::pick(p, level, at).map_or(Value::Null, crate::contour_draw::hit_json) }),
+        "contourLine" => json!({ "hit": p.drawings2d.iter().find(|d| d.id == s_of(v, "id")).map_or(Value::Null, crate::contour_draw::hit_json) }),
         _ => return crate::cmd_draw::query(root, p, v).or_else(|| crate::cmd_solid::query(root, p, v)).map(Ok),
     }))
 }
