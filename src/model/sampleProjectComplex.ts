@@ -673,13 +673,14 @@ function annotations(): Drawing2D[] {
   add("det-mass-h", dl, "85", { shape: "dimension", pts: [Q(1.55, 0.98), Q(1.55, 1.24), Q(1.55, 1.36)], offset: 0, textHeightMm: 2.5 });
   const label = (id: string, at: Vec2, target: Vec2, text: string) =>
     add(id, dl, "85", { shape: "text", at, text, height: 0.025, angle: 0, leaderTarget: target }, { endMarks: { end: "dot", sizeMm: 1.5 } });
-  label("det-t1", Q(-0.9, 1.9), Q(0.01, 1.8), "Aussenputz 20 mm");
-  label("det-t2", Q(-0.9, 1.75), Q(0.1, 1.6), "EPS 180 mm, λ = 0.034");
-  label("det-t3", Q(-0.9, 1.6), Q(0.29, 1.7), "Backstein 175 mm");
-  label("det-t4", Q(1.6, 1.62), Q(0.9, 1.35), "Parkett 15 / Unterlagsboden 65 / TSD 40");
-  label("det-t5", Q(1.6, 0.7), Q(0.9, 1.1), "Stahlbetondecke 240 mm");
-  add("det-titel", dl, "50", { shape: "text", at: Q(-0.9, 2.3), text: "Detail 1 — Deckenauflager Aussenwand  1:10", height: 0.045, angle: 0, marks: { bold: true } });
-  add("det-massstab", dl, "50", { shape: "scalebar", at: Q(-0.9, -0.5), segmentLength: 0.1, segments: 5 });
+  // Beschriftungen nah am Bauteil: der Inhalt passt bei 1:10 ins Viewport (220 × 265 mm) von Blatt 501.
+  label("det-t1", Q(-0.45, 1.9), Q(0.01, 1.8), "Aussenputz 20 mm");
+  label("det-t2", Q(-0.45, 1.75), Q(0.1, 1.72), "EPS 180 mm, λ = 0.034");
+  label("det-t3", Q(-0.45, 1.6), Q(0.29, 1.5), "Backstein 175 mm");
+  label("det-t4", Q(0.55, 1.75), Q(0.9, 1.35), "Parkett 15 / Unterlagsboden 65 / TSD 40");
+  label("det-t5", Q(0.55, 0.6), Q(0.9, 1.1), "Stahlbetondecke 240 mm");
+  add("det-titel", dl, "50", { shape: "text", at: Q(-0.45, 2.25), text: "Detail 1 — Deckenauflager Aussenwand  1:10", height: 0.045, angle: 0, marks: { bold: true } });
+  add("det-massstab", dl, "50", { shape: "scalebar", at: Q(0.75, -0.2), segmentLength: 0.1, segments: 5 });
   return d;
 }
 
@@ -742,8 +743,9 @@ const SITUATION_HIDDEN = ["00", "07", "20", "21", "22", "25", "30", "35", "40", 
 const LEVEL_VIS: Record<string, boolean> = Object.fromEntries(LEVELS.map((l) => [l.id, true]));
 /** Grundrisse auf Blättern: ohne Kataster, Strasse, Höhenlinien und Gelände. */
 const PLAN_VIS = vis(["01", "02", "10", "11", "13", "14"]);
-/** Kontext (Gelände, Baugrube, Höhenlinien, Kataster, Raster) aus — für das Detail. */
-const HIDE_SITE = vis(["00", "01", "02", "07", "10", "11", "13", "14"]);
+/** Kontext (Gelände, Baugrube, Höhenlinien, Kataster, Raster, Nachbargebäude) aus — für das Detail (sonst rechnet
+ *  der Viewport mit den Nachbarhäusern und das Detail fällt aus dem Rahmen). */
+const HIDE_SITE = vis(["00", "01", "02", "07", "10", "11", "12", "13", "14"]);
 /** [256] Vorlagen der Arbeits-/Abgabepläne: Sonnenschatten (08) und Kameras (92) aus. */
 const NO_SUN_CAMERA: Record<string, boolean> = { "08": false, "92": false };
 /** Bildschirm-px je Meter, bei denen die Ansicht genau im Papier-Massstab 1:`scale` steht (96 dpi, wie `geometry.ts::dpi`). */
@@ -821,7 +823,7 @@ function views(): Pick<Project, "viewTemplates" | "viewSnapshots" | "viewSnapsho
       },
       {
         id: "lay-501", name: "Detail und Situation", paper: "a3", orientation: "landscape", planNumber: "501", masterId: "ml-a3", folderId: "lf-plaene",
-        viewports: [{ id: "vp-501-det", snapshotId: "vs-detail", xMm: 15, yMm: 20, widthMm: 220, heightMm: 250, scaleDenominator: 10 }, { id: "vp-501-sit", snapshotId: "vs-situation", xMm: 245, yMm: 20, widthMm: 160, heightMm: 160, scaleDenominator: 500 }],
+        viewports: [{ id: "vp-501-det", snapshotId: "vs-detail", xMm: 15, yMm: 20, widthMm: 220, heightMm: 265, scaleDenominator: 10 }, { id: "vp-501-sit", snapshotId: "vs-situation", xMm: 245, yMm: 20, widthMm: 160, heightMm: 160, scaleDenominator: 500 }],
       },
       // Schnitte, Ansichten und 3D gehen (noch) nicht als Viewport: das Blatt rechnet nur Grundriss-Ebenen.
     ],
