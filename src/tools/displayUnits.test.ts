@@ -19,7 +19,10 @@ describe("[93] Anzeige-Einheiten auf dem Layout-Blatt", () => {
     expect(rulerLabel(PAPER_UNITS, "x", 0.05)).toBe("50");
     expect(rulerLabel(PAPER_UNITS, "y", -0.1)).toBe("100");
     expect(rulerLabel(PAPER_UNITS, "y", 0)).toBe("0");
-    expect(rulerLabel(MODEL_UNITS, "y", -1)).toBe("-1.000m");
+    expect(rulerLabel(MODEL_UNITS, "y", -1)).toBe("-1");
+    expect(rulerLabel(MODEL_UNITS, "x", 2.5)).toBe("2.5");
+    expect(rulerLabel(MODEL_UNITS, "x", 0.125)).toBe("0.125");
+    expect(rulerLabel(MODEL_UNITS, "x", -0.0000001)).toBe("0");
   });
 
   it("getippte Koordinaten/Längen in Papier-mm → Blatt-Meter", () => {

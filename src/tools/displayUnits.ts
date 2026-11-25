@@ -49,7 +49,9 @@ export const fmtLength = (u: DisplayUnits, m: number): string => `${fmtDisplay(u
 /** Lineal-Beschriftung einer x- bzw. y-Marke (Modell-Meter). */
 export function rulerLabel(u: DisplayUnits, axis: "x" | "y", v: number): string {
   const d = axis === "x" ? xToDisplay(u, v) : yToDisplay(u, v);
-  if (u === MODEL_UNITS || u.perMeter === 1) return `${fmtDisplay(u, d, 3)}m`;
+  // [329] Ohne nachlaufende Nullen und ohne Einheit an jeder Marke („10“, „2.5“ statt „10.000m“; Einheit in der
+  // Statusleiste), wie in Vectorworks — vorher unruhig bei jeder Teilung.
+  if (u === MODEL_UNITS || u.perMeter === 1) return String(Number(fmtDisplay(u, d, 3)));
   // Papier: ganze mm, wo es aufgeht (Schritte ≥ 1 mm), sonst eine Stelle.
   const whole = Math.abs(d - Math.round(d)) < 1e-6;
   return `${fmtDisplay(u, d, whole ? 0 : 1)}`;

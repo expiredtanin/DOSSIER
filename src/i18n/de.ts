@@ -406,7 +406,7 @@ export const de = {
   "trace.reset": "Zurücksetzen",
   "trace.showAs": "Als Pausfolie zeigen",
   "status.floor": "Geschoss",
-  "status.layer": "Ebene",
+  "status.layer": "Klasse",
   "status.none": "—",
   "status.renderer": "Renderer",
   "status.rendererWebgl": "WebGL2",
@@ -417,7 +417,10 @@ export const de = {
   "tabs.drawings": "Zeichnungen",
   "tabs.3d": "3D",
   "tabs.3dSelection": "3D · Auswahl",
-  "tabs.add": "Neuer Reiter mit der aktuellen Ansicht",
+  "tabs.add": "Neuer Reiter …",
+  "tabs.addTitle": "Im neuen Reiter öffnen",
+  "tabs.add3d": "3D",
+  "tabs.addCopy": "Kopie dieses Reiters",
   "tabs.close": "Reiter „{name}\" schliessen",
 
   // ── Navigator-Panels ─────────────────────────────────────────────────────

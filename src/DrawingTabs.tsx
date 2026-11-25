@@ -3,15 +3,18 @@
 // Ein Reiter ist eine OFFENE Ansicht (UI-Zustand, state/viewTabs.ts), kein Ausschnitt: beliebig viele,
 // auch mehrere aus demselben Ausschnitt oder ganz ohne Ausschnitt. Jeder Reiter merkt sich seinen
 // Darstellungszustand (Geschoss/Schnitt/Ansicht, Massstab, Sichtbarkeit, Overrides, Kamera); ein Klick
-// wechselt dorthin. „+" öffnet einen neuen Reiter mit der aktuellen Ansicht, „×" schliesst nur den Reiter
+// wechselt dorthin. „+" öffnet eine Auswahl ([329]): Geschoss als neuer Grundriss-Reiter, Schnitt/Ansicht/3D (vorhandener
+// Reiter oder neuer) oder eine Kopie des aktiven Reiters (vorher immer die Kopie — zwei gleiche Reiter „Erdgeschoss“), „×" schliesst nur den Reiter
 // (nie den letzten) — Ausschnitte werden ausschliesslich im Panel „Ausschnitte" angelegt/gelöscht. Der
 // Titel ist der Name des Ausschnitts, aus dem der Reiter geöffnet wurde, sonst der Name der Zeichnungsebene.
 //
 // Bezeichner englisch, UI-Text/Kommentare deutsch (CONVENTIONS.md).
 
-import { memo } from "react";
+import { memo, useState } from "react";
+import { ContextMenu, type ContextMenuItem } from "./ui/ContextMenu";
+import { openLevel, switchViewType } from "./state/tabNavigation";
 import type { ViewSnapshot } from "./model/types";
-import { useStore } from "./state/appStore";
+import { getState, useStore } from "./state/appStore";
 import { tabTitle, type ViewTab, type ViewTabsState } from "./state/viewTabs";
 import { isSelectionMode, useView3dFilter } from "./state/view3dFilter";
 import { t } from "./i18n";
@@ -44,6 +47,27 @@ export const DrawingTabs = memo(function DrawingTabs({ handlers }: { handlers: V
       return tb.id === tabs.activeId ? autoName(liveIs3d ? liveLevelId : undefined, liveIs3d) : autoName(tb.state?.activeLevelId, tb.state?.viewType === "perspektive");
     });
   const closable = tabs.tabs.length > 1;
+  // [329] „+": Auswahl, was im neuen Reiter erscheinen soll.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const levels = useStore((s) => s.project.drawingLevels);
+  const newTabItems = (): ContextMenuItem[] => {
+    const shown = levels.filter((l) => !l.layoutId);
+    const floors = shown.filter((l) => l.kind === "floor");
+    const views = shown.filter((l) => l.kind === "section" || l.kind === "elevation");
+    const items: ContextMenuItem[] = floors.map((l) => ({
+      label: l.name,
+      onClick: () => {
+        // Immer ein neuer Grundriss-Reiter (nicht der vorhandene), dann das Geschoss wählen.
+        onNew();
+        getState().setActiveLevelId(l.id);
+        getState().setViewType("grundriss");
+      },
+    }));
+    if (views.length) items.push({ divider: true }, ...views.map((l) => ({ label: l.name, onClick: () => openLevel(l.id) })));
+    items.push({ divider: true }, { label: t("tabs.add3d"), onClick: () => switchViewType("perspektive") });
+    items.push({ divider: true }, { label: t("tabs.addCopy"), onClick: () => onNew() });
+    return items;
+  };
 
   return (
     <div className="drawing-tabs" role="tablist" aria-label={t("tabs.drawings")}>
@@ -81,10 +105,15 @@ export const DrawingTabs = memo(function DrawingTabs({ handlers }: { handlers: V
         className="drawing-tab-add"
         aria-label={t("tabs.add")}
         title={t("tabs.add")}
-        onClick={() => onNew()}
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.left, y: r.bottom + 2 });
+        }}
       >
         +
       </button>
+      {menu && <ContextMenu x={menu.x} y={menu.y} title={t("tabs.addTitle")} items={newTabItems()} onClose={() => setMenu(null)} />}
     </div>
   );
 });

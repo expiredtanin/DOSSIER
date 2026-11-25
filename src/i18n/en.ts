@@ -404,7 +404,7 @@ export const en: Record<TranslationKey, string> = {
   "trace.reset": "Reset",
   "trace.showAs": "Show as trace",
   "status.floor": "Floor",
-  "status.layer": "Layer",
+  "status.layer": "Class",
   "status.none": "—",
   "status.renderer": "Renderer",
   "status.rendererWebgl": "WebGL2",
@@ -415,7 +415,10 @@ export const en: Record<TranslationKey, string> = {
   "tabs.drawings": "Drawings",
   "tabs.3d": "3D",
   "tabs.3dSelection": "3D · Selection",
-  "tabs.add": "New tab with the current view",
+  "tabs.add": "New tab …",
+  "tabs.addTitle": "Open in new tab",
+  "tabs.add3d": "3D",
+  "tabs.addCopy": "Copy of this tab",
   "tabs.close": "Close tab “{name}”",
 
   // Navigator panels.
