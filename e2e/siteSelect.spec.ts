@@ -54,6 +54,9 @@ test("Musterhaus komplex: Gelände und Schatten anwählen und bearbeiten (mit Un
 
   // Schatten: EG 1:100, Klick in den Schlagschatten nördlich des Hauses (21. Juni, 10 Uhr; westlich des Eingangs, zwischen Baugrube und Massketten — [199] rückte Achsblasen/Ketten nach aussen).
   await showSnapshot(page, "EG 1:100");
+  // Die Vorlage „Grundriss 1:100" blendet den Schatten (Klasse „08") aus — erst einblenden.
+  await openTab(page, "Ebenen");
+  await page.getByRole("button", { name: /^Schatten sichtbar$/ }).click();
   await openTab(page, "Objekt-Info");
   const time = objInfo(page).locator(".sun-time");
   await expect(async () => {

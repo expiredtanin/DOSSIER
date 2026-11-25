@@ -39,9 +39,11 @@ test("Musterhaus komplex: Cmd+A + Entf nimmt Gelände und Baugrube mit, nichts G
   test.setTimeout(120_000);
   await openComplex(page);
   await showSnapshot(page, "EG 1:100");
-  // Die Klasse „02 Gelände" ist in diesem Ausschnitt ausgeblendet: Cmd+A nimmt nur Sichtbares mit — erst einblenden.
+  // Die Klassen „02 Gelände" und „12 Gebäude" (Nachbarhäuser) sind in diesem Ausschnitt ausgeblendet: Cmd+A nimmt nur
+  // Sichtbares mit — erst einblenden.
   await openTab(page, "Ebenen");
   await page.getByRole("button", { name: /^Gelände sichtbar$/ }).click();
+  await page.getByRole("button", { name: /^Gebäude sichtbar$/ }).click();
   await openTab(page, "Objekt-Info");
   const before = await ctx(page);
   expect(before.map((c) => c.type)).toEqual(expect.arrayContaining(["terrainMesh", "contourSet", "excavation"]));
