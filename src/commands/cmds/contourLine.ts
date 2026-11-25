@@ -1,5 +1,6 @@
 // [332] Höhenlinie — eigene Gelände-Höhenlinien aus gezeichneten Linien (Linie, Polylinie, Spline, Bogen, Kreis,
-// Ellipse, Rechteck). Ablauf wie beim Extrudieren:
+// Ellipse, Rechteck) und Höhenpunkte (Kote: ihr Wert, sofort übernommen; Punktmarker: getippte Höhe; beim Gelände
+// Stützpunkte). Ablauf wie beim Extrudieren:
 //   1) Linie anklicken (oder eine vorgewählte nehmen),
 //   2) „Höhe:" → Zahl tippen, Enter übernimmt den Vorschlag (letzte Höhe + Äquidistanz).
 // Die Linie wird zur Höhenlinie (Kern `contour_draw.rs`, ein Undo-Schritt je Linie) und der Befehl wartet auf die
@@ -11,8 +12,11 @@ import { createMutation, createQuery, xy } from "../createCore";
 /** Getroffene Linie (Kern): Id, Linienzug, geschlossen? */
 export interface LineHit {
   id: string;
+  /** Linienzug; ein Punkt = Höhenpunkt (Kote, Punktmarker). */
   pts: Vec2[];
   closed: boolean;
+  /** Eigene Höhe (Kote): wird ohne Tippen übernommen. */
+  z?: number;
 }
 
 /** Zuletzt getippte Höhe und Äquidistanz (Abstand der letzten beiden Höhen) über Aufrufe hinweg. */
@@ -100,6 +104,10 @@ export const contourLineCommand: Command = {
       if (input.kind !== "point") return [s, { draft: null }];
       const hit = query(ctx.project, { q: "pickContourLine", level: ctx.level.id, pt: xy(input.point) });
       if (!hit) return [s, { draft: null, notice: { key: "cmd.contourLine.noLine", kind: "warning" } }];
+      // Kote: ihr Wert ist die Höhe — gleich übernehmen (der Vorschlag für die Linien bleibt).
+      if (hit.z !== undefined && Number.isFinite(hit.z)) {
+        return [{ ...PICK }, { draft: null, commit: createMutation(ctx, { cmd: "contourLine", source: hit.id }) }];
+      }
       return [{ phase: "height", hit, lastPoint: null } as ClHeight, draftOf(hit, input.point, ctx.project)];
     }
     if (input.kind === "number" && Number.isFinite(input.value)) return commit(s.hit, input.value, ctx);

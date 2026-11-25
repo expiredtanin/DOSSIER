@@ -481,8 +481,20 @@ pub fn terrain_from_contours(contours: &[Value], id: &str) -> Value {
 /// flache Dreiecke behoben, adaptiv geglättet (ohne Überschwingen). Äquidistanz der Plan-Höhenlinien =
 /// kleinster Höhenabstand der Konturen. Unter drei Punkten ein leeres Netz.
 pub fn terrain_from_contours_with(contours: &[Value], id: &str, o: crate::terrain::TerrainOpts) -> Value {
+    // [332] Ein-Punkt-Einträge (gezeichnete Höhenpunkte, Koten) sind Stützpunkte, keine Höhenlinien.
+    let spot = |c: &&Value| arr(field(c, "pts")).len() == 1;
+    let points: Vec<[f64; 3]> = contours
+        .iter()
+        .filter(spot)
+        .filter_map(|c| {
+            let (x, y) = xy(&arr(field(c, "pts"))[0]);
+            let z = num_of(field(c, "z"));
+            (x.is_finite() && y.is_finite() && z.is_finite()).then_some([x, y, z])
+        })
+        .collect();
     let cs: Vec<crate::terrain::ContourIn> = contours
         .iter()
+        .filter(|c| !spot(c))
         .map(|c| {
             let z = num_of(field(c, "z"));
             crate::terrain::ContourIn {
@@ -492,7 +504,7 @@ pub fn terrain_from_contours_with(contours: &[Value], id: &str, o: crate::terrai
             }
         })
         .collect();
-    let t = crate::terrain::terrain_from_contours(&cs, &[], o);
+    let t = crate::terrain::terrain_from_contours(&cs, &points, o);
     if t.tris.is_empty() {
         return json!({ "id": id, "type": "terrainMesh", "name": "Gelände", "categoryCode": "02", "positions": [], "indices": [] });
     }
@@ -1351,6 +1363,14 @@ mod tests {
         assert!(t["indices"].as_array().unwrap().len() > 6);
         assert!(pos.iter().skip(2).step_by(3).all(|z| (1.0..=2.0).contains(&z.as_f64().unwrap())));
         assert!(terrain_from_contours(&[], "t")["indices"].as_array().unwrap().is_empty());
+        // [332] Höhenpunkte (Ein-Punkt-Einträge, z. B. aus Koten) sind Stützpunkte: sie heben das Netz, zählen aber
+        // nicht für die Äquidistanz (sonst 0.37 m statt 1 m).
+        let mut cp = c.as_array().unwrap().clone();
+        cp.push(json!({"z": 1.37, "pts": [{"x": 2, "y": 6}]}));
+        let raw = terrain_from_contours_with(&cp, "t", crate::terrain::TerrainOpts { smooth: 0, max_edge: 100.0, breaklines: true });
+        assert_eq!(raw["contourInterval"], 1);
+        let pos = raw["positions"].as_array().unwrap();
+        assert!(pos.chunks(3).any(|q| q[0] == 2 && q[1] == 6 && q[2] == 1.37), "{raw}");
     }
 
     /// [T7] Rotationskörper: Achse waagrecht im Plan, Profil auf einer Seite, Matrix bildet lokal x → Quer, z → Achse ab.

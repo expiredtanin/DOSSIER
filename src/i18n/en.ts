@@ -2697,9 +2697,9 @@ export const en: Record<TranslationKey, string> = {
   "cmd.extrude.height": "Height:",
   "cmd.extrude.taper": "Taper (0–1, 1=point):",
   "cmd.contourLine.label": "Contour line",
-  "cmd.contourLine.pick": "Select line for the contour (Enter: done):",
+  "cmd.contourLine.pick": "Select line or spot level (Enter: done):",
   "cmd.contourLine.height": "Elevation (m a.s.l. or project height, Enter: suggestion):",
-  "cmd.contourLine.noLine": "No line here (click a line, polyline, spline, arc, circle, ellipse or rectangle)",
+  "cmd.contourLine.noLine": "No line here (click a line, polyline, spline, arc, circle, ellipse, rectangle, spot level or point marker)",
   "cmd.contourLine.done": "Contours added — “Terrain” builds the terrain model from them",
   // Trim (quick-trim): click the part to cut away; repeats until Esc.
   "cmd.trim.label": "Trim",

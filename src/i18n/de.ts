@@ -2709,9 +2709,9 @@ export const de = {
   "cmd.extrude.height": "Höhe:",
   "cmd.extrude.taper": "Verjüngung (0–1, 1=Spitze):",
   "cmd.contourLine.label": "Höhenlinie",
-  "cmd.contourLine.pick": "Linie für die Höhenlinie wählen (Enter: fertig):",
+  "cmd.contourLine.pick": "Linie oder Höhenkote wählen (Enter: fertig):",
   "cmd.contourLine.height": "Höhe (m ü. M. bzw. Projekthöhe, Enter: Vorschlag):",
-  "cmd.contourLine.noLine": "Hier liegt keine Linie (Linie, Polylinie, Spline, Bogen, Kreis, Ellipse oder Rechteck anklicken)",
+  "cmd.contourLine.noLine": "Hier liegt keine Linie (Linie, Polylinie, Spline, Bogen, Kreis, Ellipse, Rechteck, Höhenkote oder Punktmarker anklicken)",
   "cmd.contourLine.done": "Höhenlinien übernommen — „Gelände“ erzeugt daraus das Geländemodell",
   // Trim (Quick-Trim): auf den wegzuschneidenden Abschnitt klicken; wiederholend.
   "cmd.trim.label": "Stutzen",

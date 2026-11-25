@@ -43,12 +43,12 @@ test("Höhenlinien zeichnen: Splines anklicken, Höhe tippen, Gelände erzeugen"
 
   await openTab(page, "Gelände");
   await page.getByRole("button", { name: "Höhenlinien zeichnen" }).click();
-  await expect(prompt(page)).toHaveText("Linie für die Höhenlinie wählen (Enter: fertig):");
+  await expect(prompt(page)).toHaveText("Linie oder Höhenkote wählen (Enter: fertig):");
   await clickModel(page, 40, 1);
   await expect(prompt(page)).toHaveText(/^Höhe/);
   await commandInput(page).focus();
   await typeCommand(page, "500");
-  await expect(prompt(page)).toHaveText(/^Linie für die Höhenlinie/);
+  await expect(prompt(page)).toHaveText(/^Linie oder Höhenkote/);
   await expect.poll(() => contours(page)).toBe(1);
   await clickModel(page, 40, 7);
   await commandInput(page).focus();
@@ -57,7 +57,7 @@ test("Höhenlinien zeichnen: Splines anklicken, Höhe tippen, Gelände erzeugen"
   await expect(prompt(page)).toHaveText(/^Höhe/);
   // Enter: Vorschlag 502 (letzte Höhe + Äquidistanz); nochmals Enter: fertig.
   await commandInput(page).press("Enter");
-  await expect(prompt(page)).toHaveText(/^Linie für die Höhenlinie/);
+  await expect(prompt(page)).toHaveText(/^Linie oder Höhenkote/);
   await commandInput(page).press("Enter");
   await expect(prompt(page)).toHaveText("Befehl:");
   await expect(page.locator(".toast-message").filter({ hasText: "Höhenlinien übernommen" })).toBeVisible();

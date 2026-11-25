@@ -94,6 +94,24 @@ describe("contourLineCommand", () => {
     expect(mesh && mesh.type === "terrainMesh" ? mesh.indices.length : 0).toBeGreaterThan(0);
   });
 
+  it("Höhenkote anklicken: ihr Wert gilt sofort als Höhenpunkt, der Vorschlag für Linien bleibt", () => {
+    let p = project();
+    p = { ...p, drawings2d: [...p.drawings2d, { id: "k", type: "drawing2d", levelId: "eg", categoryCode: "20", geom: { shape: "kote", at: { x: 10, y: 20 }, value: 3.4, kind: "okFertig", rotation: 0 } }] } as Project;
+    const cmd = contourLineCommand;
+    let [s, r] = cmd.onInput(cmd.init(), { kind: "point", point: { x: 0.05, y: 0 } }, ctxOf(p));
+    [s, r] = cmd.onInput(s, { kind: "number", value: 2 }, ctxOf(p));
+    p = r.commit!(p);
+    [s, r] = cmd.onInput(s, { kind: "point", point: { x: 10.05, y: 20 } }, ctxOf(p));
+    expect(s.phase).toBe("pick");
+    p = r.commit!(p);
+    expect(contours(p).map((c) => [c.z, c.pts.length])).toEqual([[2, expect.any(Number)], [3.4, 1]]);
+    expect(suggestedZ(p)).toBe(3);
+    // Gelände aus einer Linie und dem Höhenpunkt.
+    const withTerrain = terrainCommand.autoRun!(ctxOf(p)).commit!(p);
+    const mesh = (withTerrain.context ?? []).find((o) => o.type === "terrainMesh");
+    expect(mesh && mesh.type === "terrainMesh" ? mesh.indices.length : 0).toBeGreaterThan(0);
+  });
+
   it("vorgewählte Linie: getippte Zahl ist gleich ihre Höhe", () => {
     const p = project();
     const [, r] = contourLineCommand.onInput(contourLineCommand.init(), { kind: "number", value: 3.5 }, ctxOf(p, ["b"]));

@@ -1,5 +1,6 @@
 //! [332] Eigene Höhenlinien zeichnen: eine 2D-Linie (Linie, Polylinie samt Bögen, Spline, Bezier, Bogen, Kreis,
-//! Ellipse, Rechteck) wird mit einer getippten Höhe zur Gelände-Höhenlinie. Sie kommt in den ersten Höhenlinien-Satz
+//! Ellipse, Rechteck) wird mit einer getippten Höhe zur Gelände-Höhenlinie; eine Kote (eigener Wert) bzw. ein Punktmarker
+//! (getippte Höhe) wird ein Höhenpunkt (Ein-Punkt-Eintrag, beim Gelände ein Stützpunkt, `cmd_solid::terrain_from_contours_with`). Sie kommt in den ersten Höhenlinien-Satz
 //! der Kontext-Schicht (den liest „Gelände erzeugen“, `cmd_solid::terrain_ops`), sonst in einen neuen Satz der Klasse
 //! „14 Höhenlinien“; die Quell-Zeichnung verschwindet. Ein Undo-Schritt je Linie.
 
@@ -24,7 +25,8 @@ fn flat(p: &[Vec2]) -> Vec<f64> {
     p.iter().flat_map(|q| [q.x, q.y]).collect()
 }
 
-/// Linienzug einer Zeichnung (Punkte, geschlossen?) — `None` für Texte, Masse, Schraffuren u. ä. oder Unsinn.
+/// Linienzug einer Zeichnung (Punkte, geschlossen?) — Höhenpunkte (Kote, Punktmarker) als ein Punkt; `None` für Texte,
+/// Masse, Schraffuren u. ä. oder Unsinn.
 pub fn line_of(g: &Drawing2DGeom) -> Option<(Vec<Vec2>, bool)> {
     let (pts, closed) = match g {
         Drawing2DGeom::Line { a, b } => (vec![*a, *b], false),
@@ -49,6 +51,10 @@ pub fn line_of(g: &Drawing2DGeom) -> Option<(Vec<Vec2>, bool)> {
         Drawing2DGeom::Circle { center, r } => (crate::cmd_create::circle_pts((center.x, center.y), *r, 48).into_iter().map(|(x, y)| Vec2 { x, y }).collect(), true),
         Drawing2DGeom::Ellipse { center, rx, ry, rotation } => (pts_of(&crate::curves::ellipse(center.x, center.y, *rx, *ry, *rotation, 48.0)), true),
         Drawing2DGeom::Rect { min, max } => (vec![*min, Vec2 { x: max.x, y: min.y }, *max, Vec2 { x: min.x, y: max.y }], true),
+        // Höhenpunkt: ein Stützpunkt fürs Gelände (Kote mit eigenem Wert, Punktmarker mit getippter Höhe).
+        Drawing2DGeom::Kote { at, .. } | Drawing2DGeom::Pointmarker { at } => {
+            return (at.x.is_finite() && at.y.is_finite()).then(|| (vec![*at], false));
+        }
         _ => return None,
     };
     // Doppelte Folgepunkte weg (Tessellierung, Schlusspunkt = Anfang bei geschlossenen).
@@ -67,14 +73,23 @@ pub fn line_of(g: &Drawing2DGeom) -> Option<(Vec<Vec2>, bool)> {
     (q.len() >= if closed { 3 } else { 2 }).then_some((q, closed))
 }
 
-/// Nächste Linie der Ebene am Punkt (Kantenabstand < [`HIT_TOL`]).
+/// Höhe, die die Zeichnung selbst mitbringt (Kote: ihr Wert).
+pub fn own_z(g: &Drawing2DGeom) -> Option<f64> {
+    match g {
+        Drawing2DGeom::Kote { value, .. } if value.is_finite() => Some(*value),
+        _ => None,
+    }
+}
+
+/// Nächste Linie bzw. nächster Höhenpunkt der Ebene am Punkt (Abstand < [`HIT_TOL`]).
 pub fn pick<'a>(p: &'a Project, level: &str, at: (f64, f64)) -> Option<&'a Drawing2D> {
     let mut best = None;
     let mut best_d = HIT_TOL;
     for d in p.drawings2d.iter().filter(|d| d.level_id == level) {
         let Some((pts, closed)) = line_of(&d.geom) else { continue };
         let v: Vec<(f64, f64)> = pts.iter().map(|q| (q.x, q.y)).collect();
-        for (a, b) in polyline_edges(&v, closed) {
+        let edges = if v.len() == 1 { vec![(v[0], v[0])] } else { polyline_edges(&v, closed) };
+        for (a, b) in edges {
             let dd = point_segment_distance(at, a, b);
             if dd < best_d {
                 best_d = dd;
@@ -85,10 +100,16 @@ pub fn pick<'a>(p: &'a Project, level: &str, at: (f64, f64)) -> Option<&'a Drawi
     best
 }
 
-/// Treffer als JSON für die Hülle (Hervorhebung): `{ id, pts, closed }`.
+/// Treffer als JSON für die Hülle (Hervorhebung): `{ id, pts, closed, z? }` (`z`: eigene Höhe einer Kote).
 pub fn hit_json(d: &Drawing2D) -> Value {
     match line_of(&d.geom) {
-        Some((pts, closed)) => obj(vec![("id", s(&d.id)), ("pts", pvs(&pts.iter().map(|q| (q.x, q.y)).collect::<Vec<_>>())), ("closed", Value::Bool(closed))]),
+        Some((pts, closed)) => {
+            let mut f = vec![("id", s(&d.id)), ("pts", pvs(&pts.iter().map(|q| (q.x, q.y)).collect::<Vec<_>>())), ("closed", Value::Bool(closed))];
+            if let Some(z) = own_z(&d.geom) {
+                f.push(("z", js_num(z)));
+            }
+            obj(f)
+        }
         None => Value::Null,
     }
 }
@@ -96,9 +117,9 @@ pub fn hit_json(d: &Drawing2D) -> Value {
 /// Ops: Quelle `source` (Zeichnung) mit Höhe `z` zur Höhenlinie; ohne gültige Linie/Höhe nichts.
 pub fn ops(root: &Map<String, Value>, p: &Project, v: &Value, ctx: &Ctx, ids: &mut IdGen) -> Vec<Op> {
     let src = s_of(v, "source");
-    // Höhe Pflicht (fehlt/ungültig: nichts — `n_of` machte daraus 0).
-    let z = opt_n(v, "z").unwrap_or(f64::NAN);
     let Some(d) = p.drawings2d.iter().find(|d| d.id == src) else { return Vec::new() };
+    // Höhe Pflicht: getippt, sonst die der Kote (fehlt/ungültig: nichts — `n_of` machte daraus 0).
+    let z = opt_n(v, "z").filter(|z| z.is_finite()).or_else(|| own_z(&d.geom)).unwrap_or(f64::NAN);
     let Some((pts, closed)) = line_of(&d.geom).filter(|_| z.is_finite()) else { return Vec::new() };
     if find(root, "drawings2d", src).is_none() {
         return Vec::new();
@@ -199,6 +220,19 @@ mod tests {
         assert_eq!(j[0]["kind"].as_str(), Some("replace"));
         assert_eq!(j[0]["entity"]["id"].as_str(), Some("hl"));
         assert_eq!(j[0]["entity"]["contours"].as_array().map(Vec::len), Some(2));
+        // [332] Kote: Höhenpunkt mit eigenem Wert (ohne getippte Höhe), Punktmarker braucht eine.
+        let (root2, p2) = project(
+            json!([{"id": "k", "type": "drawing2d", "levelId": "eg", "categoryCode": "80", "geom": {"shape": "kote", "at": {"x": 3, "y": 4}, "value": 452.4, "kind": "okFertig", "rotation": 0}},
+                   {"id": "m", "type": "drawing2d", "levelId": "eg", "categoryCode": "80", "geom": {"shape": "pointmarker", "at": {"x": 8, "y": 4}}}]),
+            json!([]),
+        );
+        let j: Vec<Value> = run(&root2, &p2, json!({"cmd": "contourLine", "source": "k"})).iter().map(|o| o.to_json()).collect();
+        assert_eq!(j[0]["items"][0]["contours"][0]["z"].as_f64(), Some(452.4));
+        assert_eq!(j[0]["items"][0]["contours"][0]["pts"].as_array().map(Vec::len), Some(1));
+        assert!(run(&root2, &p2, json!({"cmd": "contourLine", "source": "m"})).is_empty());
+        assert_eq!(run(&root2, &p2, json!({"cmd": "contourLine", "source": "m", "z": 450})).len(), 2);
+        assert_eq!(pick(&p2, "eg", (3.1, 4.0)).map(|d| d.id.as_str()), Some("k"));
+        assert_eq!(hit_json(pick(&p2, "eg", (3.1, 4.0)).unwrap())["z"].as_f64(), Some(452.4));
         // Angeklickt: nächste Linie der Ebene.
         assert_eq!(pick(&p, "eg", (10.0, 5.1)).map(|d| d.id.as_str()), Some("d1"));
         assert!(pick(&p, "eg", (10.0, 6.0)).is_none());
