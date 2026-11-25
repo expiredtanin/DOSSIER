@@ -628,8 +628,9 @@ function annotations(): Drawing2D[] {
 
   // Text mit Formatierung, Hinweis mit Führungslinie, Detailverweis, Massstabsleiste, Revisionswolke.
   add("titel-eg", "eg", "50", {
-    shape: "text", at: P(-2, -11.2), text: "Erdgeschoss", height: 0.7, angle: 0, width: 16,
-    doc: textDoc([{ text: "Musterhaus komplex — Erdgeschoss", bold: true }, { text: "Zweifamilienhaus am Südhang, Wohnung 1 (EG/UG) und Maisonette (OG/DG)", italic: true }]),
+    shape: "text", at: P(-2, -11.2), text: "Erdgeschoss", height: 0.4, angle: 0, width: 16,
+    // Titelzeile 14 pt gedruckt (Papier-pt, auf jedem Massstab gleich), Untertitel in der Grundhöhe (4 mm bei 1:100).
+    doc: textDoc([{ text: "Musterhaus komplex — Erdgeschoss", bold: true, sizePt: 14 }, { text: "Zweifamilienhaus am Südhang, Wohnung 1 (EG/UG) und Maisonette (OG/DG)", italic: true }]),
   });
   // [269] Hinweis nah am Bauteil: einzeilig im Wohnraum über der Hebeschiebetür (Mitte x = 8.5), kurze
   // Führungslinie zur Schwelle. Vorher stand er 4.5 m südlich unter den Massketten, die Führungslinie querte beide.
@@ -641,7 +642,7 @@ function annotations(): Drawing2D[] {
   add("detailref-1", "eg", "50", { shape: "detailref", at: P(-9, -2.6), label: "1", sheetLayoutId: "lay-501", sheetLabel: "501" });
   // [269] Titel und Massstabsbalken rücken näher ans Haus (vorher 16 bzw. 19 m darunter: ein halbes Blatt leer);
   // unter dem Haus statt links aussen, sonst sprengt der Grundriss den Viewport auf Blatt 101 (37 m bei 1:100).
-  add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-2, -14), segmentLength: 1, segments: 5 });
+  add("massstab-eg", "eg", "50", { shape: "scalebar", at: P(-2, -12.9), segmentLength: 1, segments: 5 });
   // Revisionswolke (Bögen nach aussen: negativer Bulge bei Gegenuhrzeigersinn).
   const cloud = [...arcPts(P(12.6, 0), 1.9, -Math.PI, Math.PI, 18).slice(0, 18)].map((q) => P(q.x, r3(q.y * 0.6)));
   add("revision-a", "eg", "90", { shape: "polyline", closed: true, pts: cloud, bulge: cloud.map(() => -0.45) }, { color: "#c0392b", weightMm: 0.35 });

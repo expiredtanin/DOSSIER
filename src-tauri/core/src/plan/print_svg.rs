@@ -631,15 +631,14 @@ fn entry(out: &mut Out, view: &View, i: usize, hatches: &[(i32, Hatch, i32)], m:
 /// Einzeltext (Text-Werkzeug/DXF-Import, auch Masszahlen und Koten) als `<text>` mit
 /// `<tspan>`-Zeilen (früher `drawingTextNode` in `planToPrintSvg.ts`): Grösse in Papier-mm (Höhe ×
 /// mm je Meter, wie die Plan-Ansicht beim Massstab), bei Spaltenbreite wortweise umbrochen
-/// (Run-Grenzen bleiben), gedreht um den Anker. Run-eigene `sizePt` wie in der SVG-Plan-Ansicht als
-/// Modell-pt (1 pt = 0.0254/72 m), also auch × mm je Meter.
+/// (Run-Grenzen bleiben), gedreht um den Anker. Run-eigene `sizePt` in Papier-pt (wie render2d und die
+/// Plan-Ansicht; Entscheid Maintainer 25.11.: 14 pt sind gedruckt 14 pt, auf jedem Massstab).
 fn text_node(out: &mut Out, t: &SingleText, m: Map, opacity: String) {
     let k = m.k;
     let c = m.at(t.at.x, t.at.y);
-    let unit_per_pt = (0.0254 / 72.0) * k;
-    // Basisgrösse in Modell-pt (bis 30.10. `height_m / unit_per_pt`: Meter durch mm je pt — die
-    // Runs kamen in Metern statt Papier-mm heraus, im Layout k-mal zu klein).
-    let base_pt = if unit_per_pt > 0.0 { t.height_m * k / unit_per_pt } else { 0.0 };
+    let unit_per_pt = PT_TO_MM;
+    // Basisgrösse: Höhe in Papier-mm (Meter × mm je Meter) als Papier-pt.
+    let base_pt = t.height_m * k / unit_per_pt;
     let wrap = t.wrap().map(|w| w * k);
     let o = LayoutOpts { line_height: t.height_m * k * TEXT_LINE_HEIGHT_MULT, unit_per_pt, base_pt, color: t.color.as_deref().unwrap_or("#000000") };
     let lines = wrap_doc_to_lines(&t.doc(), &o, wrap);
@@ -806,7 +805,7 @@ mod tests {
     #[test]
     fn einzeltext_umbruch_und_zeilen_in_papier_mm() {
         // Spalte 2 m = 20 mm, Höhe 0.25 m = 2.5 mm: «aaaa bbbb» (je 4 × 2.5 × 0.55 = 5.5 mm) passt in
-        // eine Zeile; Run mit eigener Grösse 72 pt = 1 Modell-Zoll = 0.254 mm bei 10 mm/m.
+        // eine Zeile; Run mit eigener Grösse 72 pt = 1 Zoll Papier = 25.4 mm (Papier-pt, unabhängig vom Massstab).
         let js = r##"{"at":{"x":0,"y":10},"text":"","heightM":0.25,"angle":0,"wrapWidth":2,"doc":{"version":1,"paragraphs":[{"runs":[{"text":"aaaa bbbb","marks":{}}]},{"runs":[{"text":"c","marks":{"sizePt":72}}],"lineHeight":2}]}}"##;
         let t: SingleText = serde_json::from_str(js).unwrap();
         let m = Map { off_x: 0.0, off_y: 0.0, min_x: 0.0, max_y: 10.0, k: 10.0 };
@@ -819,7 +818,7 @@ mod tests {
         // Absatz-Zeilenhöhe 2 × Basisgrösse (2.5 mm).
         assert_eq!((lines[0][5], lines[1][5]), ("0", "5"));
         let sizes: Vec<&str> = recs.iter().filter(|r| r[0] == "R").map(|r| r[3]).collect();
-        assert_eq!(sizes, ["2.5", "2.5", "2.5", "0.254"]);
+        assert_eq!(sizes, ["2.5", "2.5", "2.5", "25.4"]);
     }
 
     #[test]

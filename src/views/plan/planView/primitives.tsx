@@ -806,8 +806,10 @@ export function renderPrimitive(
           x: c.x,
           y: c.y,
           lineHeight: fontSize * 1.25,
-          unitPerPt: (0.0254 / 72) * PX_PER_M,
-          basePt: (p.heightM / 0.0254) * 72,
+          // Run-eigene `sizePt` in Papier-pt (wie render2d und der Druck): 1 pt belegt beim Massstab 1:N
+          // 0.0254/72·N Modell-Meter; ohne Druckmassstab der Referenzmassstab 1:100 (wie die Stempel).
+          unitPerPt: (0.0254 / 72) * (paperScale ?? 100) * PX_PER_M,
+          basePt: (p.heightM / ((0.0254 / 72) * (paperScale ?? 100))),
           color: p.color,
           wrapWidthUnits,
           columnWidth: wrapWidthUnits,
