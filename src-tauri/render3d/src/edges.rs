@@ -100,14 +100,25 @@ impl KeyHasher {
 
 /// Hash-Tabelle bzw. -Menge mit Kanten-Schlüsseln ([`KeyHasher`]).
 pub(crate) type EdgeMap<V> = HashMap<EdgeKey, V, std::hash::BuildHasherDefault<KeyHasher>>;
-pub(crate) type EdgeSet = std::collections::HashSet<EdgeKey, std::hash::BuildHasherDefault<KeyHasher>>;
 
 fn key_of(p: [f32; 3]) -> Key {
-    [
-        (p[0] * QUANT).round() as i64,
-        (p[1] * QUANT).round() as i64,
-        (p[2] * QUANT).round() as i64,
-    ]
+    [round_i64(p[0] * QUANT), round_i64(p[1] * QUANT), round_i64(p[2] * QUANT)]
+}
+
+/// [333] Gleich wie `x.round() as i64` (halbe Werte von null weg, NaN → 0, sättigend), aber ohne Aufruf von `roundf`
+/// (auf x86-64 und WASM eine Bibliotheksfunktion; drei je Eckpunkt, Millionen beim Szenen-Aufbau). `x - t` ist exakt:
+/// unter 2²³ teilen `x` und sein ganzzahliger Teil den Exponenten, darüber ist `x` selbst ganzzahlig.
+#[inline]
+fn round_i64(x: f32) -> i64 {
+    let t = x as i64;
+    let frac = x - t as f32;
+    if frac >= 0.5 {
+        t.saturating_add(1)
+    } else if frac <= -0.5 {
+        t.saturating_sub(1)
+    } else {
+        t
+    }
 }
 
 /// Sammlung je Kante: die (erste gesehene) Position beider Endpunkte plus die
@@ -392,6 +403,32 @@ pub(crate) fn draws_crease(reps: &[[f32; 3]]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// [333] `round_i64` stimmt mit `round() as i64` überein (Zufall, halbe Werte, Grenzen, NaN, Unendlich).
+    #[test]
+    fn runden_wie_round() {
+        let mut seed = 0x9E37_79B9_7F4A_7C15u64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let mut xs: Vec<f32> = vec![
+            0.0, -0.0, 0.5, -0.5, 1.5, -1.5, 2.5, -2.5, 0.49999997, -0.49999997, 8388607.5, -8388607.5, 8388608.0,
+            16777217.0, 1e19, -1e19, 9.223372e18, f32::MAX, f32::MIN, f32::INFINITY, f32::NEG_INFINITY, f32::NAN,
+            f32::MIN_POSITIVE, -f32::MIN_POSITIVE,
+        ];
+        for _ in 0..200_000 {
+            let r = next();
+            xs.push(f32::from_bits(r as u32));
+            xs.push((r >> 40) as f32 / 1024.0 - 8000.0);
+            xs.push(((r >> 11) % 2_000_001) as f32 * 0.5 - 500_000.0);
+        }
+        for x in xs {
+            assert_eq!(round_i64(x), x.round() as i64, "x = {x:e} ({:#x})", x.to_bits());
+        }
+    }
 
     /// Hilfsbau: Mesh aus (pos, dummy-normal, dummy-color) + Indizes.
     fn mesh(positions: &[[f32; 3]], indices: &[u32]) -> Mesh {

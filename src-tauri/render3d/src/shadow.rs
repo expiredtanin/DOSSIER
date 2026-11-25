@@ -282,6 +282,19 @@ pub fn caster_indices(verts: &[f32], indices: &[u32]) -> Vec<u32> {
 
 /// Ausdehnung (world) der Ecken `from..` eines Netzes; `None` wenn leer.
 pub fn verts_bounds(verts: &[f32], from_vertex: usize) -> Option<Bounds3> {
+    // [333] Schneller Weg ohne Verzweigung (`f32::min/max` übergehen NaN): stimmt, solange keine Koordinate unendlich
+    // ist — dann ist auch das Ergebnis endlich. Sonst der genaue Weg, der unendliche Werte überspringt.
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for v in verts.chunks_exact(FLOATS_PER_VERTEX).skip(from_vertex) {
+        for k in 0..3 {
+            lo[k] = lo[k].min(v[k]);
+            hi[k] = hi[k].max(v[k]);
+        }
+    }
+    if lo.iter().chain(hi.iter()).all(|v| v.is_finite()) {
+        return Some((lo, hi));
+    }
     let mut lo = [f32::INFINITY; 3];
     let mut hi = [f32::NEG_INFINITY; 3];
     for v in verts.chunks_exact(FLOATS_PER_VERTEX).skip(from_vertex) {
@@ -479,6 +492,22 @@ mod tests {
         // Kaputte Kamera: keine Box, keine Panik.
         assert!(view_region(&cam([1.0, 1.0, 1.0], [1.0, 1.0, 1.0]), 1.5).is_none());
         assert!(view_region(&c, f32::NAN).is_none());
+    }
+
+    /// [333] Ausdehnung: NaN und Unendliche werden übergangen (schneller und genauer Weg gleich).
+    #[test]
+    fn ausdehnung_uebergeht_nan_und_unendlich() {
+        let v = |p: [f32; 3]| {
+            let mut a = [0.0f32; FLOATS_PER_VERTEX];
+            a[..3].copy_from_slice(&p);
+            a
+        };
+        let pts = |ps: &[[f32; 3]]| ps.iter().flat_map(|&p| v(p)).collect::<Vec<f32>>();
+        let ok = pts(&[[1.0, -2.0, 3.0], [-1.0, 4.0, 0.5], [f32::NAN, 0.0, 9.0]]);
+        assert_eq!(verts_bounds(&ok, 0), Some(([-1.0, -2.0, 0.5], [1.0, 4.0, 9.0])));
+        let inf = pts(&[[1.0, -2.0, 3.0], [f32::INFINITY, 4.0, f32::NEG_INFINITY], [-1.0, 0.0, 0.0]]);
+        assert_eq!(verts_bounds(&inf, 0), Some(([-1.0, -2.0, 0.0], [1.0, 4.0, 3.0])));
+        assert_eq!(verts_bounds(&pts(&[[f32::NAN; 3]]), 0), None);
     }
 
     #[test]

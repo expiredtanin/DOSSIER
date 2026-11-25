@@ -61,6 +61,12 @@ web = [
 serde = { version = "1", features = ["derive"] }
 # Schraffur-Generator des Kerns (Live-Schnitt zeichnet dieselben Musterlinien wie Plan/Schnitt, [109]).
 dossier-hatch = { path = "../hatchgen" }
+# Normalen je Kante inline (`scene::EdgeEntry`): spart beim Szenen-Aufbau grosser Modelle ~1 Mio. Heap-Umbelegungen
+# (Kanten mehrerer Teile) und den Heap-Block je Kante. Version wie im Lockfile (über wgpu schon vorhanden).
+smallvec = "1"
+# Kanten-Index (`scene::EdgeIndex`): Hash-Tabelle nur mit Nummern der dicht gelagerten Einträge. Version wie im
+# Lockfile (über wgpu schon vorhanden), ohne Standard-Hasher.
+hashbrown = { version = "0.15", default-features = false }
 # JSON-Modell (dieselbe Ableitung wie der native Push): im Web-Pfad zur Laufzeit
 # geparst; optional, nur mit Feature "web".
 serde_json = { version = "1", optional = true }
