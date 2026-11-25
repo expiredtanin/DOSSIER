@@ -200,8 +200,9 @@ pub(crate) fn for_each_tri_edge(mesh: &Mesh, mut f: impl FnMut(EdgeKey, [f32; 3]
         if n == [0.0, 0.0, 0.0] {
             continue; // entartetes Dreieck ueberspringen
         }
-        for (u, v) in [(a, b), (b, c), (c, a)] {
-            let (ku, kv) = (key_of(u), key_of(v));
+        // Schlüssel je Eckpunkt einmal (jeder Punkt gehört zu zwei Kanten des Dreiecks).
+        let (ka, kb, kc) = (key_of(a), key_of(b), key_of(c));
+        for (u, v, ku, kv) in [(a, b, ka, kb), (b, c, kb, kc), (c, a, kc, ka)] {
             if ku == kv {
                 continue; // Null-Laengen-Kante
             }
@@ -332,6 +333,40 @@ pub(crate) fn representatives(normals: &[[f32; 3]]) -> Vec<[f32; 3]> {
     reps
 }
 
+/// Wie `draws_crease(&representatives(normals))`, ohne Heap fuer bis zu 16 Normalen (praktisch jede Kante; der
+/// Szenen-Aufbau entscheidet Millionen Kanten, die drei Vektoren je Kante kosteten dort einen guten Teil der Zeit).
+pub(crate) fn crease_of(normals: impl ExactSizeIterator<Item = [f32; 3]>) -> bool {
+    const N: usize = 16;
+    if normals.len() > N {
+        let ns: Vec<[f32; 3]> = normals.collect();
+        return draws_crease(&representatives(&ns));
+    }
+    let mut ns = [[0.0f32; 3]; N];
+    let mut n = 0;
+    for x in normals {
+        ns[n] = x;
+        n += 1;
+    }
+    let mut used = [false; N];
+    let mut reps = [[0.0f32; 3]; N];
+    let mut r = 0;
+    for i in 0..n {
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        reps[r] = ns[i];
+        r += 1;
+        for j in (i + 1)..n {
+            if !used[j] && dot(ns[i], ns[j]) < -CREASE_COS {
+                used[j] = true;
+                break;
+            }
+        }
+    }
+    draws_crease(&reps[..r])
+}
+
 /// Entscheidet fuer die STATISCHEN Feature-Edges, ob eine Kante gezeichnet wird:
 /// Randkante (ein Repraesentant) oder Knickkante (zwei stehen ueber dem Crease-
 /// Winkel zueinander). Koplanare geteilte Kanten (Flaechendiagonalen) fallen weg.
@@ -372,6 +407,32 @@ mod tests {
 
     fn segment_count(v: &[f32]) -> usize {
         v.len() / EDGE_FLOATS_PER_VERTEX / 2
+    }
+
+    /// `crease_of` (ohne Heap) entscheidet wie `draws_crease(representatives(..))`, auch ueber 16 Normalen.
+    #[test]
+    fn crease_of_wie_representatives() {
+        let mut seed = 7u64;
+        let mut rnd = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 33) as f32 / (1u64 << 31) as f32) * 2.0 - 1.0
+        };
+        let axes = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
+        for case in 0..4000 {
+            let n = case % 20;
+            let ns: Vec<[f32; 3]> = (0..n)
+                .map(|_| {
+                    if rnd() > 0.0 {
+                        axes[((rnd() + 1.0) * 2.99) as usize % 6]
+                    } else {
+                        let v = [rnd(), rnd(), rnd()];
+                        let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt().max(1e-6);
+                        [v[0] / l, v[1] / l, v[2] / l]
+                    }
+                })
+                .collect();
+            assert_eq!(crease_of(ns.iter().copied()), draws_crease(&representatives(&ns)), "{ns:?}");
+        }
     }
 
     #[test]
