@@ -160,6 +160,8 @@ struct Globals {
     /// (x = Kaskade benutzt). Kaskade 0 (`light_view_proj`/`shadow`) passt eng aufs Gebaeude.
     light_view_proj_far: [f32; 16],
     shadow_far: [f32; 4],
+    /// [333] Richtung ZUM Aufhelllicht (world), je Bild aus der Kamera ([`camera_fill`]).
+    fill_dir: [f32; 4],
 }
 
 /// Uniform des Schatten-Tiefenpasses, 1:1 zu `ShadowGlobals` in `SHADOW_WGSL`.
@@ -181,9 +183,10 @@ impl Default for Globals {
             // Richtung ZUM Licht (world), normiert. Sonne oben-vorne (6,12,4).
             light_dir: normalize4([6.0, 12.0, 4.0]),
             // Himmels-Ambient (von oben): helles, leicht kuehles Licht.
-            sky_color: [0.66, 0.68, 0.72, 1.0],
-            // Boden-Ambient (von unten): dunkler, warmer Ton (Bounce/Schatten).
-            ground_color: [0.30, 0.29, 0.27, 1.0],
+            sky_color: [0.72, 0.74, 0.78, 1.0],
+            // Boden-Ambient (von unten): dunkler, warmer Ton (Bounce/Schatten). [333] Angehoben (0.30 → 0.42):
+            // Schattenseiten wirkten schwer, ein Weissmodell grau.
+            ground_color: [0.42, 0.41, 0.39, 1.0],
             // Directional-Sonne: warmweiss, moderat.
             sun_color: [0.55, 0.53, 0.49, 1.0],
             mode: [0.0, 0.0, 0.0, 0.0],
@@ -193,8 +196,53 @@ impl Default for Globals {
             shadow: [0.0; 4],
             light_view_proj_far: crate::math::identity(),
             shadow_far: [0.0; 4],
+            fill_dir: normalize4([-6.0, 6.0, -4.0]),
         }
     }
+}
+
+/// [333] Lichtrichtung (ZUM Licht, world) ohne Sonnenstudie: von oben links hinter dem Betrachter, mit der Kamera
+/// um die Hochachse gedreht. Zuvor eine feste Weltrichtung (6, 12, 4): von der Gegenseite gesehen lagen beide
+/// sichtbaren Fassaden im Schatten und waren gleich grau — der Körper wirkte flach. So bekommen die zwei sichtbaren
+/// Fassaden aus jedem Blickwinkel zwei verschiedene Töne, die linke heller, Dächer am hellsten. Draufsicht (Blick
+/// senkrecht): Bezug ist der Up-Vektor der Kamera (oben im Bild).
+pub(crate) fn camera_light(camera: &Camera) -> [f32; 3] {
+    let d = [camera.target[0] - camera.eye[0], camera.target[2] - camera.eye[2]];
+    let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+    let (fx, fz) = if len > 1e-4 * (1.0 + d[0].abs().max(d[1].abs())) && len.is_finite() {
+        (d[0] / len, d[1] / len)
+    } else {
+        let u = [camera.up[0], camera.up[2]];
+        let ul = (u[0] * u[0] + u[1] * u[1]).sqrt();
+        if ul > 1e-6 && ul.is_finite() { (u[0] / ul, u[1] / ul) } else { (0.0, -1.0) }
+    };
+    // (−fz, 0, fx) = Blick × oben; die render3d-Welt ist gegenüber dem Bild gespiegelt (Plan-y → Welt-z), im Bild
+    // liegt diese Seite LINKS (am Bild geprüft: Licht von links oben wie in der Zeichnungs-Konvention).
+    let (sx, sz) = (-fz, fx);
+    [-0.45 * fx + 0.75 * sx, 1.2, -0.45 * fz + 0.75 * sz]
+}
+
+/// [333] Richtung ZUM Aufhelllicht: mit Sonne (oder fester Lichtrichtung) von oben links hinter dem Betrachter wie
+/// [`camera_light`] — die Schattenseiten bekommen je nach Lage verschiedene Töne; folgt schon das Hauptlicht der
+/// Kamera (von links), kommt das Aufhelllicht spiegelbildlich von rechts.
+pub(crate) fn camera_fill(camera: &Camera, fixed_key: bool) -> [f32; 3] {
+    // Flach (Höhe 0.3 statt 1.2): hellt vor allem die senkrechten Flächen auf, Böden und Dächer kaum (sie bleichten
+    // sonst aus: die Parzelle wurde fast weiss).
+    let k = camera_light(camera);
+    let l = [k[0], 0.3, k[2]];
+    if fixed_key {
+        return l;
+    }
+    // Spiegeln an der Blickebene: links ↔ rechts (der Anteil quer zum Blick wechselt das Vorzeichen).
+    let d = [camera.target[0] - camera.eye[0], camera.target[2] - camera.eye[2]];
+    let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
+    if !(len > 1e-6) {
+        return [-l[0], l[1], -l[2]];
+    }
+    let (fx, fz) = (d[0] / len, d[1] / len);
+    let (rx, rz) = (-fz, fx);
+    let side = l[0] * rx + l[2] * rz;
+    [l[0] - 2.0 * side * rx, l[1], l[2] - 2.0 * side * rz]
 }
 
 fn normalize4(v: [f32; 3]) -> [f32; 4] {
@@ -550,6 +598,8 @@ pub struct Renderer {
     shadows_on: bool,
     /// Licht ohne Sonne (`set_light`), gilt wieder, sobald die Sonne wegfaellt.
     base_light: [f32; 4],
+    /// [333] Ohne Sonnenstudie folgt das Licht der Kamera ([`camera_light`]), bis `set_light` eine feste Richtung setzt.
+    light_follows_camera: bool,
     /// Schattentextur muss neu gerendert werden (Sonne, Geometrie, Schnitt, Groesse geaendert) —
     /// nicht je Kamera-Frame.
     shadow_dirty: bool,
@@ -1562,6 +1612,7 @@ impl Renderer {
             sun: None,
             shadows_on: false,
             base_light: Globals::default().light_dir,
+            light_follows_camera: true,
             shadow_dirty: true,
             shadow_passes: 0,
             scene: Scene::new(),
@@ -1740,6 +1791,7 @@ impl Renderer {
     /// Ambient (Himmel/Boden) bleibt bei den Default-Farben.
     pub fn set_light(&mut self, dir_to_light: [f32; 3]) {
         self.base_light = normalize4(dir_to_light);
+        self.light_follows_camera = false;
         if self.sun.is_none() {
             self.globals.light_dir = self.base_light;
         }
@@ -2454,6 +2506,10 @@ impl Renderer {
         let aspect = if h > 0 { w as f32 / h as f32 } else { 1.0 };
         let vp: Mat4 = view_projection(camera, aspect);
         self.globals.view_proj = vp;
+        if self.sun.is_none() && self.light_follows_camera {
+            self.globals.light_dir = normalize4(camera_light(camera));
+        }
+        self.globals.fill_dir = normalize4(camera_fill(camera, self.sun.is_some() || !self.light_follows_camera));
         // `mode.x` fuer den Mesh-Shader aus dem aktuellen Stil ableiten (Material/
         // Clay/Hidden-Flaechen). Wireframe zeichnet keine Flaechen -> Wert egal.
         self.globals.mode[0] = self.style.mesh_mode();
@@ -3024,6 +3080,60 @@ impl Renderer {
 
     pub fn frame_stats(&self) -> FrameStats {
         self.frame_stats
+    }
+}
+
+#[cfg(test)]
+mod camera_light_tests {
+    use super::camera_light;
+    use crate::types::Camera;
+
+    fn cam(eye: [f32; 3], target: [f32; 3], up: [f32; 3]) -> Camera {
+        serde_json::from_value(serde_json::json!({ "eye": eye, "target": target, "up": up, "near": 0.1, "far": 1000.0 })).unwrap()
+    }
+    fn dot(a: [f32; 3], b: [f32; 3]) -> f32 {
+        let l = (a[0] * a[0] + a[1] * a[1] + a[2] * a[2]).sqrt();
+        (a[0] * b[0] + a[1] * b[1] + a[2] * b[2]) / l
+    }
+
+    /// [333] Licht von oben links hinter dem Betrachter: von jeder Seite gesehen ist die linke sichtbare Fassade
+    /// beleuchtet, die rechte nicht direkt, das Dach am hellsten; dreht die Kamera, dreht das Licht mit.
+    #[test]
+    fn licht_folgt_der_kamera() {
+        for k in 0..8 {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4 + 0.3;
+            let (sx, sz) = (a.cos(), a.sin());
+            let c = cam([20.0 * sx, 12.0, 20.0 * sz], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+            let l = camera_light(&c);
+            // Sichtbare Fassaden eines Würfels: Normalen zur Kamera hin, je 45° links/rechts der Blickachse.
+            let (bx, bz) = (sx, sz); // zur Kamera
+            let (rx, rz) = (bz, -bx); // rechts im Bild (Blick = −zur Kamera)
+            let left = [(bx - rx) / 2f32.sqrt(), 0.0, (bz - rz) / 2f32.sqrt()];
+            let right = [(bx + rx) / 2f32.sqrt(), 0.0, (bz + rz) / 2f32.sqrt()];
+            // In der (gespiegelten) render3d-Welt ist `right` die im Bild linke Fassade.
+            let (lit, dark) = (right, left);
+            assert!(dot(l, lit) > 0.4, "eine Fassade beleuchtet ({k}): {}", dot(l, lit));
+            assert!(dot(l, dark) < 0.05, "die andere im Eigenschatten ({k}): {}", dot(l, dark));
+            assert!(dot(l, [0.0, 1.0, 0.0]) > dot(l, lit), "Dach heller als die Fassade ({k})");
+        }
+        // Senkrecht von oben: Bezug ist der Up-Vektor, keine NaN.
+        let top = camera_light(&cam([0.0, 50.0, 0.0], [0.0, 0.0, 0.0], [0.0, 0.0, -1.0]));
+        assert!(top.iter().all(|v| v.is_finite()) && top[1] > 0.0);
+        let bad = camera_light(&cam([0.0, 50.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]));
+        assert!(bad.iter().all(|v| v.is_finite()));
+    }
+
+    /// [333] Aufhelllicht: mit Sonne wie das Kamera-Licht (links), sonst spiegelbildlich von rechts.
+    #[test]
+    fn aufhelllicht_links_oder_rechts() {
+        let c = cam([20.0, 12.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]); // Blick nach −x, rechts = −z
+        let l = camera_light(&c);
+        let same = super::camera_fill(&c, true);
+        assert_eq!((same[0], same[2]), (l[0], l[2]), "mit Sonne: gleiche Seite wie das Kamera-Licht");
+        assert!(same[1] < 0.5 * l[1], "flacher als das Hauptlicht");
+        let f = super::camera_fill(&c, false);
+        assert!(l[2] < -0.5 && f[2] > 0.5, "Seiten gespiegelt: {l:?} {f:?}");
+        assert!((f[0] - l[0]).abs() < 1e-6);
     }
 }
 

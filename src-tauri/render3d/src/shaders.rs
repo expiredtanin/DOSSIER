@@ -50,6 +50,7 @@ struct Globals {
     shadow        : vec4<f32>,
     light_view_proj_far : mat4x4<f32>,
     shadow_far    : vec4<f32>,
+    fill_dir      : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 @group(0) @binding(1) var shadow_map  : texture_depth_2d;
@@ -164,12 +165,12 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let sk = sun_shadow(in.world_pos, n, l);
     let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb * sk.x;
 
-    // Schwaches Gegen-Fuelllicht: aus entgegengesetztem Azimut, leicht von oben,
-    // aus der Sonnenrichtung abgeleitet — hebt abgewandte Flaechen an (kein
-    // reines Schwarz). Dezent (0.28) und leicht kuehl getoent.
-    let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
+    // Aufhelllicht, leicht kuehl getoent — hebt abgewandte Flaechen an (kein reines Schwarz).
+    // [333] Aufhelllicht folgt der Kamera (`gpu::camera_fill`): die zwei sichtbaren Schattenseiten werden
+    // verschieden hell (zuvor aus der Gegenrichtung der Sonne — beide Fassaden gleich grau).
+    let fill_l = normalize(globals.fill_dir.xyz);
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
-        * vec3<f32>(0.24, 0.27, 0.30);
+        * vec3<f32>(0.40, 0.43, 0.46);
 
     // Weiss-Modus (Clay, style==1) bzw. Hidden-Flaechen (style==2): Material-/
     // Vertexfarbe durch ein einheitliches Hell ersetzen. Clay = warmes Hellgrau,
@@ -227,6 +228,7 @@ struct Globals {
     shadow        : vec4<f32>,
     light_view_proj_far : mat4x4<f32>,
     shadow_far    : vec4<f32>,
+    fill_dir      : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 @group(0) @binding(1) var shadow_map  : texture_depth_2d;
@@ -359,9 +361,11 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb * sk.x;
 
     // Gegen-Fuelllicht (identisch zu MESH_WGSL).
-    let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
+    // [333] Aufhelllicht folgt der Kamera (`gpu::camera_fill`): die zwei sichtbaren Schattenseiten werden
+    // verschieden hell (zuvor aus der Gegenrichtung der Sonne — beide Fassaden gleich grau).
+    let fill_l = normalize(globals.fill_dir.xyz);
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
-        * vec3<f32>(0.24, 0.27, 0.30);
+        * vec3<f32>(0.40, 0.43, 0.46);
 
     // Albedo aus dem Material-Textur-Array statt Vertexfarbe. Ebene je Vertex:
     // `layer < 0` (kein Material) -> Ebene 0 (Schachbrett). Sonst auf den
@@ -405,6 +409,7 @@ struct Globals {
     shadow        : vec4<f32>,
     light_view_proj_far : mat4x4<f32>,
     shadow_far    : vec4<f32>,
+    fill_dir      : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> globals : Globals;
 @group(0) @binding(1) var shadow_map  : texture_depth_2d;
@@ -516,9 +521,11 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let ambient = mix(globals.ground_color.rgb, globals.sky_color.rgb, hemi_t);
     let sk = sun_shadow(in.world_pos, n, l);
     let diffuse = max(dot(n, l), 0.0) * globals.sun_color.rgb * sk.x;
-    let fill_l = normalize(vec3<f32>(-l.x, abs(l.y) * 0.35 + 0.15, -l.z));
+    // [333] Aufhelllicht folgt der Kamera (`gpu::camera_fill`): die zwei sichtbaren Schattenseiten werden
+    // verschieden hell (zuvor aus der Gegenrichtung der Sonne — beide Fassaden gleich grau).
+    let fill_l = normalize(globals.fill_dir.xyz);
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
-        * vec3<f32>(0.24, 0.27, 0.30);
+        * vec3<f32>(0.40, 0.43, 0.46);
 
     // UV aus der Welt-Lage + Bild-Bbox. world.x = Ost, world.z = Nord ([270]: Gelaende
     // liegt wie die Bauteile bei (x, Hoehe, y); die Kamera gleicht die Spiegelung aus).
