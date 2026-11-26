@@ -134,7 +134,9 @@ fn fs_ao(in : VsOut) -> @location(0) vec4<f32> {
         let sp = view_at(vec2<i32>(suv * u.size.xy));
         // Blick entlang −z: näher = grösseres z.
         let blocked = sp.z >= s.z + bias;
-        let range = smoothstep(0.0, 1.0, radius / max(abs(p.z - sp.z), 1e-4));
+        // Nur Verdecker in Reichweite: deutlich davor liegende Körper (Brüstung vor der Wand) dunkeln nicht ab, sonst
+        // Halo auf der Fläche dahinter.
+        let range = 1.0 - smoothstep(0.5 * radius, radius, abs(p.z - sp.z));
         occ = occ + select(0.0, range, blocked);
     }
     let ao = clamp(1.0 - occ / 12.0 * u.params.y, 0.0, 1.0);
@@ -265,9 +267,11 @@ pub(crate) fn ao_size(w: u32, h: u32) -> (u32, u32) {
 /// die Verdeckung im ganzen Quartier).
 pub(crate) fn ao_radius(view_dist: f32) -> f32 {
     if !view_dist.is_finite() {
-        return 0.6;
+        return 0.4;
     }
-    (0.04 * view_dist).clamp(0.25, 2.5)
+    // [333] Halber Radius wie zuerst (0.04·d, 0.25…2.5 m): grosse Radien legten graue Fahnen hinter Brüstungen und
+    // Fensterrahmen auf die Wand (Meldung Maintainer 26.11.).
+    (0.02 * view_dist).clamp(0.12, 1.2)
 }
 
 /// [333] Stärke der Umrisslinie (Abdunkelung 0..1).
@@ -288,7 +292,7 @@ pub(crate) fn uniform(
     AoUniform {
         proj: *proj,
         inv_proj: crate::math::invert(proj).unwrap_or_else(crate::math::identity),
-        params: [r, 1.1, 0.04 * r, if perspective { 1.0 } else { 0.0 }],
+        params: [r, 0.9, 0.04 * r, if perspective { 1.0 } else { 0.0 }],
         size: [full.0 as f32, full.1 as f32, aw as f32, ah as f32],
         flags: [f32::from(u8::from(ao)), f32::from(u8::from(outline)), OUTLINE_STRENGTH, f32::from(u8::from(ground.is_some()))],
         ground: ground.unwrap_or([0.0; 4]),
@@ -569,10 +573,10 @@ mod tests {
     fn halbe_aufloesung_und_radius() {
         assert_eq!(ao_size(1001, 2), (501, 1));
         assert_eq!(ao_size(0, 0), (1, 1));
-        assert!((ao_radius(10.0) - 0.4).abs() < 1e-6);
-        assert_eq!(ao_radius(1.0), 0.25);
-        assert_eq!(ao_radius(1e6), 2.5);
-        assert_eq!(ao_radius(f32::NAN), 0.6);
+        assert!((ao_radius(10.0) - 0.2).abs() < 1e-6);
+        assert_eq!(ao_radius(1.0), 0.12);
+        assert_eq!(ao_radius(1e6), 1.2);
+        assert_eq!(ao_radius(f32::NAN), 0.4);
     }
 
     #[test]
