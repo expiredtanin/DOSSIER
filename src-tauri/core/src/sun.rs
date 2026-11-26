@@ -214,7 +214,24 @@ impl<'a> Ground<'a> {
             last_g = g;
             let d = zr - g;
             if d <= 0.0 {
-                return at(s + RAY_STEP * prev / (prev - d));
+                // Schnitt im Intervall [s, s1] genau suchen (Halbierung): linear zwischen den Stützstellen lag er
+                // auf geknicktem Gelände (TIN-Kanten) je Punkt anders daneben — wellige Schattenränder ([333]).
+                let (mut a, mut b) = (s, s1);
+                let mut t = s + RAY_STEP * prev / (prev - d);
+                for _ in 0..24 {
+                    let q = at(t);
+                    let dt = (p[2] - t / kl) - self.z(q[0], q[1]).unwrap_or(last_g);
+                    if dt.abs() < 1e-5 {
+                        break;
+                    }
+                    if dt > 0.0 {
+                        a = t;
+                    } else {
+                        b = t;
+                    }
+                    t = 0.5 * (a + b);
+                }
+                return at(t);
             }
             if zr < floor {
                 return at((p[2] - g) * kl);
@@ -315,7 +332,61 @@ pub fn shadow_union_on(prisms: &[Prism], clouds: &[Vec<[f64; 3]>], sun: SunPosit
     if parts.is_empty() {
         return vec![];
     }
-    without_slivers(polygon_bool::union(&parts), SLIVER_AREA)
+    smoothed(without_slivers(polygon_bool::union(&parts), SLIVER_AREA))
+}
+
+/// [333] Ränder der Geländeschatten glätten ([`simplify_ring`] je Ring).
+fn smoothed(polys: Vec<Polygon>) -> Vec<Polygon> {
+    polys
+        .into_iter()
+        .map(|p| p.into_iter().map(|r| simplify_ring(&r, SIMPLIFY_TOL)).filter(|r| r.len() >= 3).collect::<Polygon>())
+        .filter(|p| !p.is_empty())
+        .collect()
+}
+
+/// [333] Toleranz (m) beim Glätten der Geländeschatten-Ränder: Abtast- und Rasterstufen darunter fallen weg.
+const SIMPLIFY_TOL: f64 = 0.03;
+
+/// [333] Douglas-Peucker auf einem geschlossenen Ring: Punkte, die weniger als `tol` von der Verbindung ihrer
+/// Nachbarn abweichen, fallen weg (Stützpunkte gerader Kanten, Treppchen vom Ganzzahlraster der Vereinigung).
+pub fn simplify_ring(r: &[[f64; 2]], tol: f64) -> Ring {
+    let n = r.len();
+    if n < 4 {
+        return r.to_vec();
+    }
+    // Anker: Punkt 0 und der von ihm entfernteste; beide Hälften getrennt vereinfachen.
+    let far = (1..n).max_by(|&i, &j| {
+        let d = |k: usize| hypot2(r[k][0] - r[0][0], r[k][1] - r[0][1]);
+        d(i).total_cmp(&d(j))
+    });
+    let Some(far) = far else { return r.to_vec() };
+    let mut keep = vec![false; n];
+    keep[0] = true;
+    keep[far] = true;
+    let mut stack = vec![(0usize, far), (far, n)];
+    while let Some((i, j)) = stack.pop() {
+        if j <= i + 1 {
+            continue;
+        }
+        let (a, b) = (r[i], r[j % n]);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len = hypot2(dx, dy);
+        let (mut best, mut at) = (-1.0, i);
+        for (k, q) in r.iter().enumerate().take(j).skip(i + 1) {
+            let dist = if len > 1e-12 { ((q[0] - a[0]) * dy - (q[1] - a[1]) * dx).abs() / len } else { hypot2(q[0] - a[0], q[1] - a[1]) };
+            if dist > best {
+                best = dist;
+                at = k;
+            }
+        }
+        if best > tol {
+            keep[at] = true;
+            stack.push((i, at));
+            stack.push((at, j));
+        }
+    }
+    let out: Ring = r.iter().zip(&keep).filter(|(_, k)| **k).map(|(q, _)| *q).collect();
+    if out.len() >= 3 { out } else { r.to_vec() }
 }
 
 /// Baum als Schattenwerfer ([142]): Stamm (Prisma, Ø 0.3 m) und Krone (Ellipsoid aus drei Ringen und
@@ -397,6 +468,21 @@ pub fn without_holes(poly: &Polygon) -> Vec<Ring> {
 
 #[cfg(test)]
 mod tests {
+
+    /// [333] Glätten: Zwischenpunkte gerader Kanten und kleine Zacken fallen weg, echte Ecken bleiben.
+    #[test]
+    fn ring_glaetten() {
+        let mut r: Vec<[f64; 2]> = Vec::new();
+        for i in 0..20 {
+            r.push([i as f64 * 0.5, if i % 2 == 0 { 0.0 } else { 0.01 }]);
+        }
+        r.extend([[10.0, 0.0], [10.0, 5.0], [0.0, 5.0]]);
+        let g = simplify_ring(&r, 0.03);
+        assert_eq!(g, vec![[0.0, 0.0], [10.0, 0.0], [10.0, 5.0], [0.0, 5.0]]);
+        let tri = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]];
+        assert_eq!(simplify_ring(&tri, 0.03), tri);
+    }
+
     use super::*;
     use crate::flat_read::signed_area;
 
@@ -1369,7 +1455,11 @@ fn shadow_compute(casters: &Casters, covers: &[Cover], recvs: &[Recv], k: [f64; 
     if out.is_empty() {
         return vec![];
     }
-    without_slivers(polygon_bool::union(&out), if has_site { SLIVER_AREA } else { 1e-4 })
+    if has_site {
+        smoothed(without_slivers(polygon_bool::union(&out), SLIVER_AREA))
+    } else {
+        without_slivers(polygon_bool::union(&out), 1e-4)
+    }
 }
 
 /// Grösster Rest (m²), der als Rest an Abdeckungen wegfällt ([`drop_cover_rests`]).
