@@ -59,23 +59,25 @@ struct Globals {
 
 // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand von ~4 Texeln.
 fn shadow_pcf(t : texture_depth_2d, uv : vec2<f32>, depth : f32, step : f32) -> f32 {
+    // [333] 4×4 Proben im Abstand eines Texels zwischen den Texeln (±0.5, ±1.5), jede bilinear verglichen: ein
+    // glatter Übergang über ~4 Texel statt 3×3 auf den Texeln (dort zeigten Schattenränder Treppchen, „verpixelt“).
     var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy += 1) {
-        for (var dx = -1; dx <= 1; dx += 1) {
-            let o = vec2<f32>(f32(dx), f32(dy)) * step;
+    for (var dy = 0; dy < 4; dy += 1) {
+        for (var dx = 0; dx < 4; dx += 1) {
+            let o = (vec2<f32>(f32(dx), f32(dy)) - vec2<f32>(1.5, 1.5)) * step;
             sum += textureSampleCompareLevel(t, shadow_samp, uv + o, depth);
         }
     }
-    return sum / 9.0;
+    return sum / 16.0;
 }
 
 // Lage in einer Kaskade: xy = Textur-UV, z = Tiefe (Licht-NDC), w = 1, wenn der PCF-Kern ganz in der
-// Textur liegt (Rand 2 Texel) und die Tiefe im Frustum.
+// Textur liegt (Rand 3 Texel) und die Tiefe im Frustum.
 fn shadow_coord(m : mat4x4<f32>, p : vec3<f32>, step : f32) -> vec4<f32> {
     let c = m * vec4<f32>(p, 1.0);
     let ndc = c.xyz / c.w;
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    let r = 2.0 * step;
+    let r = 3.0 * step;
     let inside = uv.x >= r && uv.x <= 1.0 - r && uv.y >= r && uv.y <= 1.0 - r && ndc.z >= 0.0 && ndc.z <= 1.0;
     return vec4<f32>(uv, ndc.z, select(0.0, 1.0, inside));
 }
@@ -237,23 +239,25 @@ struct Globals {
 
 // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand von ~4 Texeln.
 fn shadow_pcf(t : texture_depth_2d, uv : vec2<f32>, depth : f32, step : f32) -> f32 {
+    // [333] 4×4 Proben im Abstand eines Texels zwischen den Texeln (±0.5, ±1.5), jede bilinear verglichen: ein
+    // glatter Übergang über ~4 Texel statt 3×3 auf den Texeln (dort zeigten Schattenränder Treppchen, „verpixelt“).
     var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy += 1) {
-        for (var dx = -1; dx <= 1; dx += 1) {
-            let o = vec2<f32>(f32(dx), f32(dy)) * step;
+    for (var dy = 0; dy < 4; dy += 1) {
+        for (var dx = 0; dx < 4; dx += 1) {
+            let o = (vec2<f32>(f32(dx), f32(dy)) - vec2<f32>(1.5, 1.5)) * step;
             sum += textureSampleCompareLevel(t, shadow_samp, uv + o, depth);
         }
     }
-    return sum / 9.0;
+    return sum / 16.0;
 }
 
 // Lage in einer Kaskade: xy = Textur-UV, z = Tiefe (Licht-NDC), w = 1, wenn der PCF-Kern ganz in der
-// Textur liegt (Rand 2 Texel) und die Tiefe im Frustum.
+// Textur liegt (Rand 3 Texel) und die Tiefe im Frustum.
 fn shadow_coord(m : mat4x4<f32>, p : vec3<f32>, step : f32) -> vec4<f32> {
     let c = m * vec4<f32>(p, 1.0);
     let ndc = c.xyz / c.w;
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    let r = 2.0 * step;
+    let r = 3.0 * step;
     let inside = uv.x >= r && uv.x <= 1.0 - r && uv.y >= r && uv.y <= 1.0 - r && ndc.z >= 0.0 && ndc.z <= 1.0;
     return vec4<f32>(uv, ndc.z, select(0.0, 1.0, inside));
 }
@@ -423,23 +427,25 @@ struct Globals {
 
 // PCF: 3x3 Abtastungen mit linearem Vergleichs-Sampler (je 2x2 Texel) -> weicher Rand von ~4 Texeln.
 fn shadow_pcf(t : texture_depth_2d, uv : vec2<f32>, depth : f32, step : f32) -> f32 {
+    // [333] 4×4 Proben im Abstand eines Texels zwischen den Texeln (±0.5, ±1.5), jede bilinear verglichen: ein
+    // glatter Übergang über ~4 Texel statt 3×3 auf den Texeln (dort zeigten Schattenränder Treppchen, „verpixelt“).
     var sum = 0.0;
-    for (var dy = -1; dy <= 1; dy += 1) {
-        for (var dx = -1; dx <= 1; dx += 1) {
-            let o = vec2<f32>(f32(dx), f32(dy)) * step;
+    for (var dy = 0; dy < 4; dy += 1) {
+        for (var dx = 0; dx < 4; dx += 1) {
+            let o = (vec2<f32>(f32(dx), f32(dy)) - vec2<f32>(1.5, 1.5)) * step;
             sum += textureSampleCompareLevel(t, shadow_samp, uv + o, depth);
         }
     }
-    return sum / 9.0;
+    return sum / 16.0;
 }
 
 // Lage in einer Kaskade: xy = Textur-UV, z = Tiefe (Licht-NDC), w = 1, wenn der PCF-Kern ganz in der
-// Textur liegt (Rand 2 Texel) und die Tiefe im Frustum.
+// Textur liegt (Rand 3 Texel) und die Tiefe im Frustum.
 fn shadow_coord(m : mat4x4<f32>, p : vec3<f32>, step : f32) -> vec4<f32> {
     let c = m * vec4<f32>(p, 1.0);
     let ndc = c.xyz / c.w;
     let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    let r = 2.0 * step;
+    let r = 3.0 * step;
     let inside = uv.x >= r && uv.x <= 1.0 - r && uv.y >= r && uv.y <= 1.0 - r && ndc.z >= 0.0 && ndc.z <= 1.0;
     return vec4<f32>(uv, ndc.z, select(0.0, 1.0, inside));
 }
