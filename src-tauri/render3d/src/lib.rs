@@ -1407,6 +1407,13 @@ mod tests {
             .validate(&grid_module)
             .unwrap_or_else(|e| panic!("grid: WGSL-Validierung fehlgeschlagen: {e:?}"));
 
+        // [333] Bodengitter als Fläche.
+        let gg = naga::front::wgsl::parse_str(super::shaders::GROUND_GRID_WGSL)
+            .unwrap_or_else(|e| panic!("ground grid: WGSL-Parse-Fehler: {e:?}"));
+        Validator::new(ValidationFlags::all(), Capabilities::all())
+            .validate(&gg)
+            .unwrap_or_else(|e| panic!("ground grid: WGSL-Validierung fehlgeschlagen: {e:?}"));
+
         // Schnittflaechen-Kappen-Shader (Live-Schnitt-Schraffur) ebenso.
         let cap_src = super::shaders::CAP_WGSL;
         let cap_module = naga::front::wgsl::parse_str(cap_src)

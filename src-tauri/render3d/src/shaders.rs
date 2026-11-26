@@ -588,6 +588,97 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// [333] WGSL des Bodengitters (`grid::build_ground_grid`, gpu `ground_grid_pipeline`): eine Fläche, die Linien je
+/// Pixel aus der Weltlage — Abstand zur nächsten Linie in Bildschirm-Pixeln (`fwidth`), daraus eine geglättete
+/// Deckung von etwa einem Pixel Breite. Meter- und 5-m-Linien je für sich; beide blenden aus, sobald ihre Linien
+/// weniger als einige Pixel auseinander liegen (zum Horizont hin: kein Moiré, keine graue Fläche), dazu ein weicher
+/// Rand am Ende des Quadrats. Farbe mit Alpha über das Bild (ohne Tiefen-Write), nur im leeren Hintergrund (Tiefe
+/// 1.0, s. `FsOut`). Schnittebene wie `GRID_WGSL`.
+/// Vertex: Position + `[spacing, half, major_every]`.
+pub const GROUND_GRID_WGSL: &str = r#"
+struct Globals {
+    view_proj     : mat4x4<f32>,
+    light_dir     : vec4<f32>,
+    sky_color     : vec4<f32>,
+    ground_color  : vec4<f32>,
+    sun_color     : vec4<f32>,
+    mode          : vec4<f32>,
+    section_plane : vec4<f32>,
+};
+@group(0) @binding(0) var<uniform> globals : Globals;
+
+struct VsIn {
+    @location(0) position : vec3<f32>,
+    @location(1) params   : vec3<f32>,
+};
+
+struct VsOut {
+    @builtin(position) clip_pos : vec4<f32>,
+    @location(0) params    : vec3<f32>,
+    @location(1) world_pos : vec3<f32>,
+};
+
+@vertex
+fn vs_main(in : VsIn) -> VsOut {
+    var out : VsOut;
+    out.clip_pos = globals.view_proj * vec4<f32>(in.position, 1.0);
+    out.params = in.params;
+    out.world_pos = in.position;
+    return out;
+}
+
+const MINOR_COLOR : vec3<f32> = vec3<f32>(0.72, 0.72, 0.74);
+const MAJOR_COLOR : vec3<f32> = vec3<f32>(0.55, 0.55, 0.58);
+
+// Deckung (0..1) der Linien eines Rasters mit Zellkoordinate `c` (Linien bei ganzen Zahlen) und Pixelgrösse `w` je
+// Zelle: rund ein Pixel breit, geglättet; blendet aus, wenn die Linien näher als ~4 Pixel stehen.
+fn lines(c : vec2<f32>, w : vec2<f32>) -> f32 {
+    let d = abs(fract(c - 0.5) - 0.5) / max(w, vec2<f32>(1e-6));
+    let cover = 1.0 - clamp(min(d.x, d.y) - 0.25, 0.0, 1.0);
+    let dense = max(w.x, w.y);
+    return cover * (1.0 - smoothstep(0.12, 0.3, dense));
+}
+
+struct FsOut {
+    @location(0) color : vec4<f32>,
+    // Ganz hinten: das Gitter füllt nur den leeren Hintergrund (Pipeline `LessEqual` gegen die gelöschte Tiefe 1.0) —
+    // Gelände und Bauteile verdecken es unabhängig von ihrer Höhe (ein Bezugsgitter auf ±0 deckte sonst tieferes
+    // Gelände und das Untergeschoss zu).
+    @builtin(frag_depth) depth : f32,
+};
+
+@fragment
+fn fs_main(in : VsOut) -> FsOut {
+    if (globals.mode.y > 0.5) {
+        if (dot(in.world_pos, globals.section_plane.xyz) + globals.section_plane.w > 0.0) {
+            discard;
+        }
+    }
+    let spacing = in.params.x;
+    let half = in.params.y;
+    let every = in.params.z;
+    let c = in.world_pos.xz / spacing;
+    let w = fwidth(c);
+    let minor = lines(c, w);
+    let major = lines(c / every, w / every);
+    // Weicher Rand: die letzten 15 % der Halb-Ausdehnung blenden aus.
+    let r = max(abs(in.world_pos.x), abs(in.world_pos.z));
+    let edge = 1.0 - smoothstep(0.85 * half, half, r);
+    // Dezent: Meterlinien halb, 5-m-Linien zu drei Vierteln gedeckt (auf hellem Grund wie die früheren 1-px-Linien).
+    let a_major = 0.75 * major * edge;
+    let a_minor = 0.5 * minor * edge * (1.0 - a_major);
+    let a = a_major + a_minor;
+    if (a < 0.004) {
+        discard;
+    }
+    let col = (MAJOR_COLOR * a_major + MINOR_COLOR * a_minor) / a;
+    var out : FsOut;
+    out.color = vec4<f32>(col, a);
+    out.depth = 1.0;
+    return out;
+}
+"#;
+
 /// WGSL der Schnittflaechen-Kappen (Cut-Caps, section_fill.rs / gpu::cap_pipeline).
 /// Eigene TriangleList-Pipeline: Vertex-Layout [pos vec3, uv vec2, hatch vec3],
 /// dieselbe `Globals`-Bind-Group (group(0) binding(0)) wie Mesh/Grid. Die Caps

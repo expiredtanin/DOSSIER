@@ -437,6 +437,8 @@ pub struct Renderer {
     /// Teilt sich das `Globals`-Uniform/Bind-Group (nur View-Projektion) mit der
     /// Mesh-Pipeline und rendert in denselben Pass/Tiefenpuffer.
     grid_pipeline: wgpu::RenderPipeline,
+    /// [333] Bodengitter als Fläche (Linien im Shader).
+    ground_grid_pipeline: wgpu::RenderPipeline,
     /// Wie `grid_pipeline` (LineList, GRID_WGSL), aber OHNE Tiefentest
     /// (`depth_compare: Always`, kein Depth-Write): die Auswahl-Highlight-Linien
     /// liegen immer sichtbar obenauf und scheinen auch hinter Waenden durch.
@@ -560,6 +562,7 @@ pub struct Renderer {
     chunks: Vec<ChunkBuffers>,
     /// Bodengitter-Vertices (None = nicht erzeugt). Wird nur gezeichnet, wenn
     /// zusaetzlich `grid_visible` gesetzt ist.
+    /// Bodenfläche des Gitters (6 Vertices, `grid::build_ground_grid`).
     grid: Option<LineBuffers>,
     /// Auswahl-Highlight-Linien (Kanten des selektierten Bauteils, LineList) als
     /// LineBuffers. None = keine Auswahl -> nichts wird gezeichnet. Ueber
@@ -925,6 +928,43 @@ impl Renderer {
         // die Auswahl-Umrisslinien werden unabhaengig von der Szenentiefe immer
         // gezeichnet und scheinen so auch hinter Waenden durch (liegen optisch oben,
         // weil sie als letztes gezeichnet werden).
+        // [333] Bodengitter als eine Fläche (Linien je Pixel im Shader, s. `GROUND_GRID_WGSL`): Alpha über das Bild,
+        // nur im leeren Hintergrund (der Shader schreibt Tiefe 1.0, `LessEqual` gegen die gelöschte Tiefe), ohne Tiefen-Write.
+        let ground_grid_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ground_grid.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::GROUND_GRID_WGSL.into()),
+        });
+        let ground_grid_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ground_grid.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &ground_grid_module,
+                entry_point: Some("vs_main"),
+                buffers: &[grid_vertex_layout.clone()],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &ground_grid_module,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::LessEqual),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multiview_mask: None,
+            cache: None,
+        });
         let highlight_pipeline = make_line_pipeline(
             "highlight.pipeline",
             wgpu::DepthStencilState {
@@ -1478,6 +1518,7 @@ impl Renderer {
             pipeline,
             hidden_face_pipeline,
             grid_pipeline,
+            ground_grid_pipeline,
             highlight_pipeline,
             ghost_pipeline,
             ghost: None,
@@ -1771,8 +1812,8 @@ impl Renderer {
         };
     }
 
-    /// Setzt/aktualisiert das Referenz-Bodengitter (grid.rs). Erzeugt den Linien-
-    /// Vertex-Buffer aus den Parametern neu und merkt sich die Sichtbarkeit; der
+    /// Setzt/aktualisiert das Referenz-Bodengitter (grid.rs). Erzeugt den Vertex-Buffer der
+    /// Bodenfläche ([333], Linien im Shader) aus den Parametern neu und merkt sich die Sichtbarkeit; der
     /// naechste `render` zeichnet das Gitter (bzw. nichts bei `visible == false`).
     /// Ohne Aufruf bleibt das Gitter unsichtbar (Default), damit bestehende
     /// Aufrufer unveraendert bleiben.
@@ -2741,7 +2782,7 @@ impl Renderer {
             //    wenn sichtbar + vorhanden.
             if self.grid_visible {
                 if let Some(g) = &self.grid {
-                    pass.set_pipeline(&self.grid_pipeline);
+                    pass.set_pipeline(&self.ground_grid_pipeline);
                     pass.set_bind_group(0, &self.bind_group, &[]);
                     pass.set_vertex_buffer(0, g.vbo.slice(..));
                     pass.draw(0..g.vertex_count, 0..1);
