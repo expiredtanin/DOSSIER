@@ -45,6 +45,30 @@ export default defineConfig({
     trace: "retain-on-failure",
     launchOptions: { executablePath: chromiumPath(), args: ["--enable-unsafe-webgpu"] },
   },
+  // [333] Zwei Projekte: die Suite wie bisher (headless verliert Chromium ohne ANGLE das WebGPU-Gerät, der Plan zeichnet
+  // über den SVG-Rückfall) und `webgpu` mit SwiftShader über ANGLE/Vulkan — dort zeichnen render2d/render3d wirklich
+  // (`e2e/webgpu*.spec.ts`).
+  projects: [
+    { name: "chromium", testIgnore: /webgpu\d*\.spec\.ts$/ },
+    {
+      name: "webgpu",
+      testMatch: /webgpu\d*\.spec\.ts$/,
+      use: {
+        launchOptions: {
+          executablePath: chromiumPath(),
+          args: [
+            "--enable-unsafe-webgpu",
+            "--use-gl=angle",
+            "--use-angle=swiftshader",
+            "--enable-features=Vulkan",
+            "--use-vulkan=swiftshader",
+            "--use-webgpu-adapter=swiftshader",
+            "--disable-vulkan-surface",
+          ],
+        },
+      },
+    },
+  ],
   webServer: {
     command: `npx vite build --outDir dist-test && npx vite preview --outDir dist-test --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,

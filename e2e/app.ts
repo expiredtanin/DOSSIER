@@ -1,6 +1,7 @@
 // Gemeinsame Bausteine der UI-Suite ([49]): `test` mit Konsolen-Wächter und Bedien-Helfer.
 // Geprüft wird über sichtbare UI (Text, Panel-Werte, Elemente-Baum) — nie über Pixel: Die
-// WebGPU-Engines zeichnen headless nichts Verlässliches.
+// WebGPU-Engines zeichnen headless nichts Verlässliches (Ausnahme [333]: Projekt „webgpu“, `webgpu*.spec.ts`, mit
+// SwiftShader über ANGLE — dort wird der Canvas gleich nach dem submit gelesen).
 import { appendFileSync } from "node:fs";
 import { expect, test as base, type Page } from "@playwright/test";
 
