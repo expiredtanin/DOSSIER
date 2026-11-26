@@ -21,6 +21,7 @@
 import { HostNotAllowedError, OfflineError, netFetch } from "../net/net";
 import type { Project } from "../model/types";
 import { pathtraceMaterials } from "../core";
+import type { MaterialDecodeRequest, MaterialDecodeResponse } from "./materialTextures.worker";
 
 /** Kantenlänge einer Textur-Ebene in Texeln (muss zu render3d `TEXTURE_SIZE`). */
 const TEX_SIZE = 256;
@@ -54,50 +55,98 @@ export async function decodeMaterialTextures(
   const urls = entries.map((e) => e.map);
   if (urls.length === 0) return null;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = TEX_SIZE;
-  canvas.height = TEX_SIZE;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return null;
-
   const bytesPerLayer = TEX_SIZE * TEX_SIZE * 4;
-  // [333] Alle Bilder zugleich laden und schon beim Dekodieren auf 256×256 verkleinern (`createImageBitmap` mit
-  // `resizeWidth`, ausserhalb des Hauptthreads); zuvor nacheinander und gross auf den Canvas gezeichnet — beim Öffnen
-  // der 3D-Ansicht rund 0.3 s Hauptthread. Fehlgeschlagenes Bild: null → Ebene bleibt schwarz (0); render3d klemmt bei
-  // Bedarf ohnehin auf gültige Ebenen, die übrigen Materialien stimmen.
-  const load = (url: string | undefined): Promise<CanvasImageSource | null> =>
-    url ? loadImage(url).catch(() => null) : Promise.resolve(null);
-  const into = (img: CanvasImageSource | null, out: Uint8Array, i: number): void => {
-    if (!img) return;
+  // [212] Normalen- und Rauigkeitskarten nur, wenn mindestens ein Eintrag sie hat (sonst kein Speicher).
+  const hasNormal = entries.some((e) => e.normal);
+  const hasRough = entries.some((e) => e.rough);
+  const lists: (string | undefined)[][] = [
+    urls,
+    entries.map((e) => (hasNormal ? e.normal : undefined)),
+    entries.map((e) => (hasRough ? e.rough : undefined)),
+  ];
+  const flat = lists.flat();
+  // [333] 1) Alle Bild-Dateien zugleich holen (Hauptthread, `netFetch`: Offline-Modus und Host-Liste gelten).
+  //       2) Im Worker dekodieren und auslesen (`materialTextures.worker.ts`; im Hauptthread kostete das beim Öffnen
+  //          der 3D-Ansicht rund 0.25 s). 3) Was übrig bleibt (kein Worker/OffscreenCanvas, Fehler, URL, die fetch
+  //          nicht mag), wie bisher im Hauptthread. Fehlgeschlagenes Bild: Ebene bleibt schwarz (0); render3d klemmt bei
+  //          Bedarf ohnehin auf gültige Ebenen, die übrigen Materialien stimmen.
+  const blobs = await Promise.all(flat.map((u) => (u ? fetchBlob(u) : Promise.resolve(null))));
+  const decoded = await decodeInWorker(blobs.map((b) => (b instanceof Blob ? b : null)));
+  const out = lists.map(() => new Uint8Array(urls.length * bytesPerLayer));
+  let ctx: CanvasRenderingContext2D | null | undefined;
+  for (let k = 0; k < flat.length; k++) {
+    const url = flat[k];
+    if (!url) continue;
+    const [list, i] = [Math.floor(k / urls.length), k % urls.length];
+    const px = decoded?.[k];
+    if (px) {
+      out[list].set(new Uint8Array(px), i * bytesPerLayer);
+      continue;
+    }
+    if (blobs[k] === BLOCKED) continue;
+    if (ctx === undefined) {
+      const canvas = document.createElement("canvas");
+      canvas.width = TEX_SIZE;
+      canvas.height = TEX_SIZE;
+      ctx = canvas.getContext("2d", { willReadFrequently: true });
+    }
+    if (!ctx) continue;
+    const img = await loadImage(url).catch(() => null);
+    if (!img) continue;
     try {
       ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
       // Auf 256×256 skalieren (die Ebenen eines Arrays müssen gleich groß sein; meist schon so dekodiert).
       ctx.drawImage(img, 0, 0, TEX_SIZE, TEX_SIZE);
-      out.set(ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE).data, i * bytesPerLayer);
+      out[list].set(ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE).data, i * bytesPerLayer);
     } catch {
       // Ebene bleibt schwarz.
     } finally {
       if (typeof ImageBitmap !== "undefined" && img instanceof ImageBitmap) img.close();
     }
-  };
-  // [212] Normalen- und Rauigkeitskarten nur, wenn mindestens ein Eintrag sie hat (sonst kein Speicher).
-  const hasNormal = entries.some((e) => e.normal);
-  const hasRough = entries.some((e) => e.rough);
-  const [maps, normals, roughs] = await Promise.all([
-    Promise.all(urls.map((u) => load(u))),
-    Promise.all(entries.map((e) => load(hasNormal ? e.normal : undefined))),
-    Promise.all(entries.map((e) => load(hasRough ? e.rough : undefined))),
-  ]);
-  const layers = (imgs: (CanvasImageSource | null)[]): Uint8Array => {
-    const out = new Uint8Array(urls.length * bytesPerLayer);
-    imgs.forEach((img, i) => into(img, out, i));
-    return out;
-  };
-  const data = layers(maps);
-  const normal = hasNormal ? layers(normals) : null;
-  const rough = hasRough ? layers(roughs) : null;
+  }
+  const [data, normalAll, roughAll] = out;
+  const normal = hasNormal ? normalAll : null;
+  const rough = hasRough ? roughAll : null;
   const signature = entries.map((e) => `${e.map}|${e.normal ?? ""}|${e.rough ?? ""}`).join("\n");
   return { data, count: urls.length, signature, normal, rough };
+}
+
+/** Offline-Modus oder Host nicht erlaubt: kein Rückfall über ein Bild-Element ([262]). */
+const BLOCKED = "blocked" as const;
+
+/** Bild-Datei über `netFetch`; `null`, wenn fetch scheitert (Rückfall im Hauptthread), {@link BLOCKED} offline. */
+async function fetchBlob(url: string): Promise<Blob | null | typeof BLOCKED> {
+  if (typeof fetch !== "function") return null;
+  try {
+    const res = await netFetch(url);
+    return await res.blob();
+  } catch (err) {
+    return err instanceof OfflineError || err instanceof HostNotAllowedError ? BLOCKED : null;
+  }
+}
+
+/**
+ * [333] Dekodiert die Blobs im Worker (`materialTextures.worker.ts`): je Blob RGBA8 oder `null`. `null` insgesamt, wenn
+ * Worker oder OffscreenCanvas fehlen oder der Worker scheitert (dann alles im Hauptthread).
+ */
+async function decodeInWorker(blobs: (Blob | null)[]): Promise<(ArrayBuffer | null)[] | null> {
+  if (typeof Worker === "undefined" || typeof OffscreenCanvas === "undefined" || !blobs.some((b) => b)) return null;
+  let worker: Worker;
+  try {
+    worker = new Worker(new URL("./materialTextures.worker.ts", import.meta.url), { type: "module" });
+  } catch {
+    return null;
+  }
+  return new Promise((resolve) => {
+    const done = (v: (ArrayBuffer | null)[] | null) => {
+      worker.terminate();
+      resolve(v);
+    };
+    worker.onmessage = (e: MessageEvent<MaterialDecodeResponse>) => done(e.data.layers.length === blobs.length ? e.data.layers : null);
+    worker.onerror = () => done(null);
+    const req: MaterialDecodeRequest = { id: 1, size: TEX_SIZE, blobs };
+    worker.postMessage(req);
+  });
 }
 
 /**
