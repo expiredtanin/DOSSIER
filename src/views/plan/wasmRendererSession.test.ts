@@ -104,7 +104,7 @@ const frame = (x: number): PlanFrame => ({
   height: 100,
 });
 
-function setup(opts: { probationMs?: number; maxRecoveries?: number; failCreate?: () => boolean; now?: () => number; loadFont?: (key: number) => Promise<Uint8Array | null> } = {}) {
+function setup(opts: { probationMs?: number; maxRecoveries?: number; failCreate?: () => boolean; now?: () => number; loadFont?: (key: number) => Promise<Uint8Array | null>; park?: (r: WebPlanRendererLike) => void } = {}) {
   const made: FakeRenderer[] = [];
   const ready: boolean[] = [];
   const warnings: string[] = [];
@@ -126,6 +126,7 @@ function setup(opts: { probationMs?: number; maxRecoveries?: number; failCreate?
     info: () => {},
     probationMs: opts.probationMs ?? 0,
     recovery: new GpuRecovery({ maxLosses: opts.maxRecoveries ?? 3, windowMs: 1000, baseDelayMs: 0, now: opts.now ?? (() => 0) }),
+    ...(opts.park ? { park: opts.park } : {}),
   });
   /** Ausstehende `create`-Aufrufe erfüllen und die Mikrotasks abarbeiten. */
   const settle = async () => {
@@ -140,6 +141,23 @@ function setup(opts: { probationMs?: number; maxRecoveries?: number; failCreate?
 }
 
 describe("WasmPlanRendererSession", () => {
+  it("[333] Abbau mit `park`: intakter Renderer wird geparkt statt freigegeben, ein verlorener freigegeben", async () => {
+    const parkedR: WebPlanRendererLike[] = [];
+    const a = setup({ park: (r) => parkedR.push(r) });
+    a.session.start();
+    await a.settle();
+    a.session.dispose();
+    expect(parkedR).toEqual([a.made[0]]);
+    expect(a.made[0].freed).toBe(false);
+    const b = setup({ park: (r) => parkedR.push(r) });
+    b.session.start();
+    await b.settle();
+    b.made[0].lost = true;
+    b.session.dispose();
+    expect(parkedR).toHaveLength(1);
+    expect(b.made[0].freed).toBe(true);
+  });
+
   it("lädt jede Szene einmal hoch, zeichnet danach den letzten Ausschnitt", async () => {
     const { session, made, settle, ready } = setup();
     session.start();

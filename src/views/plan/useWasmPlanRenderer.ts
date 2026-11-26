@@ -46,7 +46,61 @@ function loadEngine(): Promise<any> {
   return enginePromise;
 }
 
-/** Neuen Renderer auf dem Canvas erzeugen (auch nach Geräteverlust: derselbe Canvas-Kontext). */
+/**
+ * [333] Geparkte Renderer: Schliesst sich eine Plan-Ansicht (Tab-Wechsel), wird ihr Renderer nicht freigegeben,
+ * sondern aufbewahrt; die nächste Plan-Ansicht hängt ihn an ihren Canvas (`attach_canvas`) statt ein neues
+ * WebGPU-Gerät anzufordern (das kostete beim Wechsel zurück zum Plan den grössten Teil von ~0.35 s). Höchstens
+ * {@link PARK_MAX} (Grundriss, Schnitt, Ansicht nebeneinander), nach {@link PARK_MS} freigegeben.
+ */
+const PARK_MAX = 3;
+const PARK_MS = 5 * 60_000;
+const parked: { r: WebPlanRendererLike; timer: ReturnType<typeof setTimeout> }[] = [];
+
+function freeQuietly(r: WebPlanRendererLike): void {
+  try {
+    r.free?.();
+  } catch {
+    /* bereits unbrauchbar */
+  }
+}
+
+function park(r: WebPlanRendererLike): void {
+  if (typeof r.attach_canvas !== "function") {
+    freeQuietly(r);
+    return;
+  }
+  const entry = {
+    r,
+    timer: setTimeout(() => {
+      const i = parked.indexOf(entry);
+      if (i >= 0) parked.splice(i, 1);
+      freeQuietly(r);
+    }, PARK_MS),
+  };
+  parked.push(entry);
+  while (parked.length > PARK_MAX) {
+    const old = parked.shift()!;
+    clearTimeout(old.timer);
+    freeQuietly(old.r);
+  }
+}
+
+/** Einen geparkten Renderer an `canvas` hängen; null, wenn keiner da ist oder das Anhängen scheitert. */
+function unpark(canvas: HTMLCanvasElement): WebPlanRendererLike | null {
+  for (let e = parked.pop(); e; e = parked.pop()) {
+    clearTimeout(e.timer);
+    try {
+      if (e.r.is_lost()) throw new Error("verloren");
+      e.r.attach_canvas!(canvas);
+      return e.r;
+    } catch {
+      freeQuietly(e.r);
+    }
+  }
+  return null;
+}
+
+/** Neuen Renderer auf dem Canvas erzeugen (auch nach Geräteverlust: derselbe Canvas-Kontext) oder einen geparkten anhängen. */
 async function createRenderer(canvas: HTMLCanvasElement): Promise<WebPlanRendererLike> {
   const mod = await loadEngine();
   // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
@@ -54,7 +108,7 @@ async function createRenderer(canvas: HTMLCanvasElement): Promise<WebPlanRendere
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.max(1, Math.round(rect.width * dpr));
   canvas.height = Math.max(1, Math.round(rect.height * dpr));
-  return (await mod.WebPlanRenderer.new(canvas, undefined)) as WebPlanRendererLike;
+  return unpark(canvas) ?? ((await mod.WebPlanRenderer.new(canvas, undefined)) as WebPlanRendererLike);
 }
 
 /**
@@ -76,6 +130,7 @@ function sessionFor(canvas: HTMLCanvasElement): CanvasSession {
       encode: (plan) => planSceneBin(plan),
       loadFont: (key) => loadFontFile(key),
       onReadyChange: (r) => listeners.forEach((l) => l(r)),
+      park,
     });
     cs = { session, listeners };
     sessions.set(canvas, cs);

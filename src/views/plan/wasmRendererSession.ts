@@ -50,6 +50,8 @@ export interface WebPlanRendererLike {
   mark_font_unavailable?(key: number): void;
   /** true, sobald das WebGPU-Gerät verloren ist (dann zeichnet der Renderer nichts mehr). */
   is_lost(): boolean;
+  /** [333] An einen neuen Canvas hängen (`web::attach_canvas`). Optional — ältere WASM-Builds. */
+  attach_canvas?(canvas: HTMLCanvasElement): void;
   /** Rückruf beim Geräteverlust (aus dem `device.lost`-Promise); Argument: Grund und Meldung. */
   set_lost_callback?(f: (why?: string) => void): void;
   free?(): void;
@@ -84,6 +86,11 @@ export interface SessionOptions<S> {
   schedule?(fn: () => void, ms: number): () => void;
   /** [118] Bewährungszeit eines nach Verlust neu aufgebauten Renderers bis `ready` in ms (Vorgabe 1000). */
   probationMs?: number;
+  /**
+   * [333] Beim Abbau (`dispose`) statt `free`: der intakte Renderer geht an den Aufrufer, der ihn für die nächste
+   * Plan-Ansicht parkt (Tab-Wechsel ohne neues WebGPU-Gerät). Nach Verlust oder Abbruch wird wie bisher verworfen.
+   */
+  park?(r: WebPlanRendererLike): void;
 }
 
 export class WasmPlanRendererSession<S> {
@@ -155,8 +162,10 @@ export class WasmPlanRendererSession<S> {
     this.cancelProbation?.();
     this.cancelProbation = null;
     this.setReady(false);
-    this.release(this.renderer, true);
+    const r = this.renderer;
     this.renderer = null;
+    if (r && this.opts.park && !r.is_lost?.()) this.opts.park(r);
+    else this.release(r, true);
   }
 
   private setReady(r: boolean): void {
