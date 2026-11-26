@@ -485,6 +485,10 @@ pub struct Renderer {
     /// Teilt sich das `Globals`-Uniform/Bind-Group (nur View-Projektion) mit der
     /// Mesh-Pipeline und rendert in denselben Pass/Tiefenpuffer.
     grid_pipeline: wgpu::RenderPipeline,
+    /// [333] Umgebungsverdeckung (beleuchtete Stile) und ob sie an ist (`set_ambient_occlusion`).
+    /// `None` unter GL (dort liest wgpu keine Tiefentexturen per `textureLoad`).
+    ssao: Option<crate::ssao::Ssao>,
+    ssao_on: bool,
     /// [333] Bodengitter als Fläche (Linien im Shader).
     ground_grid_pipeline: wgpu::RenderPipeline,
     /// Wie `grid_pipeline` (LineList, GRID_WGSL), aber OHNE Tiefentest
@@ -1568,6 +1572,9 @@ impl Renderer {
             pipeline,
             hidden_face_pipeline,
             grid_pipeline,
+            ssao: (device.adapter_info().backend != wgpu::Backend::Gl)
+                .then(|| crate::ssao::Ssao::new(device, color_format, DEPTH_FORMAT, SAMPLE_COUNT)),
+            ssao_on: true,
             ground_grid_pipeline,
             highlight_pipeline,
             ghost_pipeline,
@@ -1837,6 +1844,11 @@ impl Renderer {
     /// Zahl der bisher gerenderten Schatten-Tiefenpaesse (Diagnose: nicht je Kamera-Frame).
     pub fn shadow_pass_count(&self) -> u32 {
         self.shadow_passes
+    }
+
+    /// [333] Umgebungsverdeckung (weiche Kontaktschatten) in den beleuchteten Stilen an/aus (Standard an).
+    pub fn set_ambient_occlusion(&mut self, on: bool) {
+        self.ssao_on = on;
     }
 
     /// Uebersteuert die hemisphaerischen Ambient-Farben (Himmel oben, Boden unten)
@@ -2445,10 +2457,19 @@ impl Renderer {
             sample_count: SAMPLE_COUNT,
             dimension: wgpu::TextureDimension::D2,
             format: DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            // [333] Auch lesbar: die Umgebungsverdeckung (`ssao`) liest die Tiefe aus Durchgang A.
+            // (Nur mit AO: unter GL macht die Bindungs-Nutzung einer MSAA-Tiefe das Bild schwarz.)
+            usage: if self.ssao.is_some() {
+                wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING
+            } else {
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+            },
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        if let Some(a) = &mut self.ssao {
+            a.invalidate();
+        }
         self.depth = Some(DepthTarget {
             view,
             width: w.max(1),
@@ -2624,6 +2645,15 @@ impl Renderer {
         // Punktwolken: Viewport/Punktgroesse in die Uniforms (feste Pixelgroesse).
         self.points.prepare(queue, (w, h));
 
+        // [333] Umgebungsverdeckung nur in den beleuchteten Flächen-Stilen (nicht Verdeckt/Konturen/Drahtgitter).
+        let ao_on = self.ssao.is_some() && self.ssao_on && self.style.draws_faces() && self.style.mesh_mode() < 1.5;
+        let ao_u = ao_on.then(|| {
+            let proj = crate::math::projection_matrix(camera, aspect);
+            let d = crate::math::sub(camera.target, camera.eye);
+            let perspective = matches!(camera.projection, crate::types::Projection::Perspective);
+            let dist = if perspective { crate::math::length(d) } else { camera.ortho_half_height * 2.0 };
+            crate::ssao::uniform(&proj, perspective, dist, (w, h))
+        });
         let depth_view = &self.depth.as_ref().unwrap().view;
         let msaa_view = &self.msaa.as_ref().unwrap().view;
 
@@ -2644,12 +2674,14 @@ impl Renderer {
                     view: msaa_view,
                     // Ziel ist eine 2D-Textur (kein 3D-Volumen) -> kein Depth-Slice.
                     depth_slice: None,
-                    resolve_target: Some(target),
+                    // [333] Mit Umgebungsverdeckung endet dieser Durchgang nach den Flächen (Farbe bleibt, aufgelöst wird
+                    // am Ende von Durchgang B).
+                    resolve_target: if ao_on { None } else { Some(target) },
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(self.clear_color),
                         // Der multisampled Inhalt selbst wird nach dem Aufloesen nicht
                         // mehr gebraucht — Discard spart Bandbreite.
-                        store: wgpu::StoreOp::Discard,
+                        store: if ao_on { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -2749,6 +2781,31 @@ impl Renderer {
                     pass.draw(0..wc.vertex_count, 0..1);
                     st.add(wc.vertex_count);
                 }
+            }
+
+            // [333] Umgebungsverdeckung: Durchgang A endet hier (Flächen), AO aus der Tiefe, Durchgang B multipliziert die
+            // Farbe und zeichnet dann Kappen, Kanten, Linien und Gitter unverdunkelt.
+            if let (Some(u), Some(ssao)) = (&ao_u, self.ssao.as_mut()) {
+                drop(pass);
+                ssao.encode(device, queue, &mut encoder, depth_view, u);
+                pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("3d.pass.b"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: msaa_view,
+                        depth_slice: None,
+                        resolve_target: Some(target),
+                        ops: wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth_view,
+                        depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Store }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                ssao.draw_composite(&mut pass);
             }
 
             // 1b) Schnittflaechen-Kappen (Cut-Caps) NACH den Flaechen, VOR den

@@ -653,6 +653,12 @@ impl WebModelRenderer {
         Ok(())
     }
 
+    /// [333] Umgebungsverdeckung (weiche Kontaktschatten) in den beleuchteten Stilen an/aus (Standard an). Wirkt beim
+    /// naechsten `render`.
+    pub fn set_ambient_occlusion(&mut self, on: bool) {
+        self.renderer.set_ambient_occlusion(on);
+    }
+
     /// Setzt/loescht die Auswahl-Highlight-Linien (Umriss/Kanten des selektierten
     /// Bauteils). `vertices` = interleaved LineList-Vertices
     /// `[px,py,pz, r,g,b, ...]` (world-Meter, je 2 Vertices = 1 Segment) — exakt

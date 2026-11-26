@@ -44,6 +44,47 @@ pub fn mul(a: &Mat4, b: &Mat4) -> Mat4 {
     m
 }
 
+/// [333] Inverse (spalten-major), in f64 gerechnet; `None` bei (nahezu) singulärer oder nicht endlicher Matrix.
+pub fn invert(m: &Mat4) -> Option<Mat4> {
+    let a: Vec<f64> = m.iter().map(|&v| v as f64).collect();
+    // Gauss-Jordan auf [A | I] (Zeile r, Spalte c: a[c*4 + r]).
+    let mut w = [[0.0f64; 8]; 4];
+    for r in 0..4 {
+        for c in 0..4 {
+            w[r][c] = a[c * 4 + r];
+        }
+        w[r][4 + r] = 1.0;
+    }
+    for col in 0..4 {
+        let piv = (col..4).max_by(|&i, &j| w[i][col].abs().total_cmp(&w[j][col].abs()))?;
+        if !(w[piv][col].abs() > 1e-12) {
+            return None;
+        }
+        w.swap(col, piv);
+        let d = w[col][col];
+        for v in w[col].iter_mut() {
+            *v /= d;
+        }
+        for r in 0..4 {
+            if r != col {
+                let f = w[r][col];
+                if f != 0.0 {
+                    for c in 0..8 {
+                        w[r][c] -= f * w[col][c];
+                    }
+                }
+            }
+        }
+    }
+    let mut out = [0.0f32; 16];
+    for r in 0..4 {
+        for c in 0..4 {
+            out[c * 4 + r] = w[r][4 + c] as f32;
+        }
+    }
+    out.iter().all(|v| v.is_finite()).then_some(out)
+}
+
 /// Wendet die Matrix auf einen Punkt (w=1) an und liefert die kartesische xyz
 /// (nach Division durch w). Fuer Tests / Punkt-Projektion.
 pub fn transform_point(m: &Mat4, p: [f32; 3]) -> [f32; 4] {
@@ -286,6 +327,25 @@ pub fn fit_target_dist(bounds: Option<Bounds3>, fov_y: f32) -> ([f32; 3], f32) {
 
 #[cfg(test)]
 mod fit_tests {
+
+    /// [333] Inverse: A·A⁻¹ = I für Projektion und Kamera, singulär → None.
+    #[test]
+    fn inverse_und_singulaer() {
+        let p = perspective(0.9, 1.6, 0.05, 800.0);
+        let v = look_at([3.0, 4.0, 5.0], [0.0, 1.0, 0.0], [0.0, 1.0, 0.0]);
+        for m in [p, v, mul(&p, &v)] {
+            let i = invert(&m).expect("invertierbar");
+            let e = mul(&m, &i);
+            for (k, x) in e.iter().enumerate() {
+                assert!((x - if k % 5 == 0 { 1.0 } else { 0.0 }).abs() < 1e-4, "{k}: {x}");
+            }
+        }
+        assert!(invert(&[0.0; 16]).is_none());
+        let mut nan = identity();
+        nan[3] = f32::NAN;
+        assert!(invert(&nan).is_none());
+    }
+
     use super::*;
 
     #[test]

@@ -44,6 +44,8 @@ pub mod view_dir;
 #[cfg(feature = "render")]
 pub mod gpu;
 #[cfg(feature = "render")]
+pub(crate) mod ssao;
+#[cfg(feature = "render")]
 pub mod gpu_points;
 #[cfg(feature = "render")]
 pub mod gpu_pathtrace;
