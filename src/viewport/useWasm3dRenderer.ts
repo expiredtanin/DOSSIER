@@ -71,6 +71,8 @@ interface WebModelRendererLike {
   /** Sonne der Sonnenstudie ([64], `web::set_sun`): Azimut/Höhe in Grad, `shadows` = Schatten im 3D.
    *  `active=false` oder Sonne unter dem Horizont: Standardlicht, keine Schatten. Optional — ältere WASM-Builds. */
   set_sun?(active: boolean, azimuthDeg: number, elevationDeg: number, shadows: boolean): void;
+  /** [333] Umgebungsverdeckung (weiche Kontaktschatten, `web::set_ambient_occlusion`). Optional — ältere WASM-Builds. */
+  set_ambient_occlusion?(on: boolean): void;
   /** Formatfüllendes Ziel + Abstand für Modell UND sichtbare Punktwolken: `[tx, ty, tz, dist]`
    *  (world, Y-oben; `web::view_fit`). Optional — ältere WASM-Builds. */
   view_fit?(): Float32Array | number[];
@@ -578,6 +580,17 @@ export function useWasm3dRenderer(
     }
   }, []);
 
+  /** [333] Umgebungsverdeckung an/aus (folgt der Klasse „08 Schatten“, s. Wasm3DViewport). Wirkt beim nächsten `render`. */
+  const setAmbientOcclusion = useCallback((on: boolean) => {
+    const r = rendererRef.current;
+    if (!r?.set_ambient_occlusion) return;
+    try {
+      r.set_ambient_occlusion(on);
+    } catch (e) {
+      console.warn("render3d set_ambient_occlusion fehlgeschlagen:", e);
+    }
+  }, []);
+
   /**
    * Boden-Referenzraster ein-/ausblenden (Overlay-Umschalter im Viewport,
    * s. Wasm3DViewport.tsx). `elevationM` = OKFF des aktiven Geschosses
@@ -902,6 +915,7 @@ export function useWasm3dRenderer(
     pathtraceStatus,
     setPathtraceLook,
     setSun,
+    setAmbientOcclusion,
     applyViewPreset,
     viewFit,
     readRustCamera,

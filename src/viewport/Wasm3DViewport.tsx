@@ -682,6 +682,7 @@ export function Wasm3DViewport({
     pathtraceStatus,
     setPathtraceLook,
     setSun,
+    setAmbientOcclusion,
     applyViewPreset,
     viewFit,
     readRustCamera,
@@ -897,6 +898,13 @@ export function Wasm3DViewport({
     setSun(s.active, s.azimuth, s.elevation);
     redrawRef.current();
   }, [ready, sunKey, setSun]);
+
+  // [333] Umgebungsverdeckung gehört zu den Schatten: aus, wenn die Klasse „08 Schatten“ ausgeblendet ist ([180]).
+  useEffect(() => {
+    if (!ready) return;
+    setAmbientOcclusion(shadowsShown);
+    redrawRef.current();
+  }, [ready, shadowsShown, setAmbientOcclusion]);
 
   // Boden-Referenzraster: bei Bereitschaft oder Wechsel von Sichtbarkeit/
   // Geschoss-Hoehe neu setzen + zeichnen. Fixe Ausdehnung/Abstand (300 m /
