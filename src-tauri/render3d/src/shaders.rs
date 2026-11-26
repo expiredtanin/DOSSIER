@@ -304,12 +304,14 @@ fn sun_shadow(world_pos : vec3<f32>, n : vec3<f32>, l : vec3<f32>) -> vec2<f32> 
 @group(1) @binding(0) var tex  : texture_2d_array<f32>;
 @group(1) @binding(1) var samp : sampler;
 
-// [214] Ecken aus dem Flaechen-Puffer (`[pos, normal, color]`, color ungenutzt) — kein eigener texturierter
+// [214] Ecken aus dem Flaechen-Puffer (`[pos, normal, color]`) — kein eigener texturierter
 // Puffer mehr; die UV rechnet der Vertex-Shader wie `mesh::textured_from_mesh`.
 struct VsIn {
     @location(0) position : vec3<f32>,
     @location(1) normal   : vec3<f32>,
-    // Material-Textur-Ebene dieses Vertex (`-1` = kein Material -> Schachbrett).
+    // [333] Farbe des Bauteils: gilt ohne Material (zuvor das Ersatz-Schachbrett).
+    @location(2) color    : vec3<f32>,
+    // Material-Textur-Ebene dieses Vertex (`-1` = kein Material -> Vertexfarbe).
     @location(3) layer    : f32,
 };
 
@@ -328,6 +330,7 @@ struct VsOut {
     @location(1) uv           : vec2<f32>,
     @location(2) world_pos    : vec3<f32>,
     @location(3) @interpolate(flat) layer : f32,
+    @location(4) color        : vec3<f32>,
 };
 
 @vertex
@@ -338,6 +341,7 @@ fn vs_main(in : VsIn) -> VsOut {
     out.uv = wall_uv(in.position, in.normal);
     out.world_pos = in.position;
     out.layer = in.layer;
+    out.color = in.color;
     return out;
 }
 
@@ -367,13 +371,14 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     let fill = max(dot(n, fill_l), 0.0) * globals.sun_color.rgb
         * vec3<f32>(0.40, 0.43, 0.46);
 
-    // Albedo aus dem Material-Textur-Array statt Vertexfarbe. Ebene je Vertex:
-    // `layer < 0` (kein Material) -> Ebene 0 (Schachbrett). Sonst auf den
-    // gueltigen Bereich [0, mode.z-1] geklemmt (Sicherheit gegen ueberzaehlige
-    // Indizes, falls die Material-Menge kleiner ist als erwartet).
+    // Albedo aus dem Material-Textur-Array. Ebene je Vertex, auf den gueltigen Bereich [0, mode.z-1]
+    // geklemmt (Sicherheit gegen ueberzaehlige Indizes). [333] `layer < 0` (kein Material: Gelände, Kontext,
+    // Glas, Körper) -> die Farbe des Bauteils wie im Stil „Schattiert“ (zuvor das graue Ersatz-Schachbrett, das
+    // wie ein Testbild wirkte). Die Textur wird trotzdem abgetastet (gleichförmiger Kontrollfluss für die Ableitungen).
     let max_layer = max(i32(globals.mode.z) - 1, 0);
     let li = clamp(i32(round(in.layer)), 0, max_layer);
-    let albedo = textureSample(tex, samp, in.uv, li).rgb;
+    let sampled = textureSample(tex, samp, in.uv, li).rgb;
+    let albedo = select(sampled, in.color, in.layer < -0.5);
 
     var shaded = albedo * (ambient * sk.y + diffuse + fill);
 

@@ -1232,12 +1232,12 @@ impl Renderer {
             label: Some("mesh_textured.wgsl"),
             source: wgpu::ShaderSource::Wgsl(MESH_TEXTURED_WGSL.into()),
         });
-        // [214] Vertex-Layout = Flaechen-Puffer `[pos vec3, normal vec3, color vec3]` (color ungenutzt, UV im
-        // Shader): derselbe Puffer wie der schattierte Pfad, kein zweites Netz je Klumpen.
+        // [214] Vertex-Layout = Flaechen-Puffer `[pos vec3, normal vec3, color vec3]` (UV im Shader; color [333]
+        // fuer Teile ohne Material): derselbe Puffer wie der schattierte Pfad, kein zweites Netz je Klumpen.
         let textured_vertex_layout = wgpu::VertexBufferLayout {
             array_stride: (FLOATS_PER_VERTEX * 4) as u64,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+            attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3],
         };
         // ZWEITER Vertex-Buffer: die Material-Textur-Ebene je Vertex (@location(3),
         // 1 f32). Separat gehalten, damit das Haupt-`[pos,normal,uv]`-Layout (und
