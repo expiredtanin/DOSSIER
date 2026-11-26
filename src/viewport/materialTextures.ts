@@ -20,7 +20,7 @@
 
 import { HostNotAllowedError, OfflineError, netFetch } from "../net/net";
 import type { Project } from "../model/types";
-import { pathtraceMaterials, type PtMaterialEntry } from "../core";
+import { pathtraceMaterials } from "../core";
 
 /** Kantenlänge einer Textur-Ebene in Texeln (muss zu render3d `TEXTURE_SIZE`). */
 const TEX_SIZE = 256;
@@ -61,33 +61,41 @@ export async function decodeMaterialTextures(
   if (!ctx) return null;
 
   const bytesPerLayer = TEX_SIZE * TEX_SIZE * 4;
-  const decodeInto = async (url: string, out: Uint8Array, i: number): Promise<void> => {
+  // [333] Alle Bilder zugleich laden und schon beim Dekodieren auf 256×256 verkleinern (`createImageBitmap` mit
+  // `resizeWidth`, ausserhalb des Hauptthreads); zuvor nacheinander und gross auf den Canvas gezeichnet — beim Öffnen
+  // der 3D-Ansicht rund 0.3 s Hauptthread. Fehlgeschlagenes Bild: null → Ebene bleibt schwarz (0); render3d klemmt bei
+  // Bedarf ohnehin auf gültige Ebenen, die übrigen Materialien stimmen.
+  const load = (url: string | undefined): Promise<CanvasImageSource | null> =>
+    url ? loadImage(url).catch(() => null) : Promise.resolve(null);
+  const into = (img: CanvasImageSource | null, out: Uint8Array, i: number): void => {
+    if (!img) return;
     try {
-      const img = await loadImage(url);
       ctx.clearRect(0, 0, TEX_SIZE, TEX_SIZE);
-      // Auf 256×256 skalieren (die Ebenen eines Arrays müssen gleich groß sein).
+      // Auf 256×256 skalieren (die Ebenen eines Arrays müssen gleich groß sein; meist schon so dekodiert).
       ctx.drawImage(img, 0, 0, TEX_SIZE, TEX_SIZE);
-      const pixels = ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE);
-      out.set(pixels.data, i * bytesPerLayer);
+      out.set(ctx.getImageData(0, 0, TEX_SIZE, TEX_SIZE).data, i * bytesPerLayer);
     } catch {
-      // Fehlgeschlagenes Bild: Ebene bleibt schwarz (0) — render3d klemmt bei
-      // Bedarf ohnehin auf gültige Ebenen; die übrigen Materialien stimmen.
+      // Ebene bleibt schwarz.
+    } finally {
+      if (typeof ImageBitmap !== "undefined" && img instanceof ImageBitmap) img.close();
     }
   };
-  const data = new Uint8Array(urls.length * bytesPerLayer);
-  for (let i = 0; i < urls.length; i++) await decodeInto(urls[i], data, i);
   // [212] Normalen- und Rauigkeitskarten nur, wenn mindestens ein Eintrag sie hat (sonst kein Speicher).
-  const detail = async (pick: (e: PtMaterialEntry) => string | undefined): Promise<Uint8Array | null> => {
-    if (!entries.some((e) => pick(e))) return null;
+  const hasNormal = entries.some((e) => e.normal);
+  const hasRough = entries.some((e) => e.rough);
+  const [maps, normals, roughs] = await Promise.all([
+    Promise.all(urls.map((u) => load(u))),
+    Promise.all(entries.map((e) => load(hasNormal ? e.normal : undefined))),
+    Promise.all(entries.map((e) => load(hasRough ? e.rough : undefined))),
+  ]);
+  const layers = (imgs: (CanvasImageSource | null)[]): Uint8Array => {
     const out = new Uint8Array(urls.length * bytesPerLayer);
-    for (let i = 0; i < entries.length; i++) {
-      const url = pick(entries[i]);
-      if (url) await decodeInto(url, out, i);
-    }
+    imgs.forEach((img, i) => into(img, out, i));
     return out;
   };
-  const normal = await detail((e) => e.normal);
-  const rough = await detail((e) => e.rough);
+  const data = layers(maps);
+  const normal = hasNormal ? layers(normals) : null;
+  const rough = hasRough ? layers(roughs) : null;
   const signature = entries.map((e) => `${e.map}|${e.normal ?? ""}|${e.rough ?? ""}`).join("\n");
   return { data, count: urls.length, signature, normal, rough };
 }
@@ -95,14 +103,18 @@ export async function decodeMaterialTextures(
 /**
  * Lädt eine Bild-URL (Data-URL, Object-URL oder Asset-Pfad) zu einem
  * zeichenbaren Bild. Nutzt `createImageBitmap` (schnell, entkoppelt vom
- * DOM-Layout), fällt auf ein `HTMLImageElement` zurück, wo es fehlt.
+ * DOM-Layout, gleich auf {@link TEX_SIZE} verkleinert), fällt auf ein `HTMLImageElement` zurück, wo es fehlt.
  */
 async function loadImage(url: string): Promise<CanvasImageSource> {
   if (typeof createImageBitmap === "function" && typeof fetch === "function") {
     try {
       const res = await netFetch(url);
       const blob = await res.blob();
-      return await createImageBitmap(blob);
+      try {
+        return await createImageBitmap(blob, { resizeWidth: TEX_SIZE, resizeHeight: TEX_SIZE, resizeQuality: "high" });
+      } catch {
+        return await createImageBitmap(blob);
+      }
     } catch (err) {
       // Offline-Modus und Host-Liste gelten auch für den Bild-Fallback unten ([262]).
       if (err instanceof OfflineError || err instanceof HostNotAllowedError) throw err;
