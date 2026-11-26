@@ -33,6 +33,11 @@ export interface GpuRendererSlotOptions<R> {
   /** Zeitgeber (Vorgabe `setTimeout`); liefert eine Abbruch-Funktion. */
   schedule?(fn: () => void, ms: number): () => void;
   warn?(msg: string, e?: unknown): void;
+  /**
+   * [333] Beim Abbau (`dispose`) statt `free`: der intakte Renderer geht an den Aufrufer (render3d parkt ihn für das
+   * Wiederöffnen der 3D-Ansicht). Nach einem Verlust oder Abbruch wird wie bisher verworfen.
+   */
+  release?(raw: R): void;
   /** Weitere Neuaufbauten im selben Zeitfenster (Vorgabe `console.info`). */
   info?(msg: string, e?: unknown): void;
 }
@@ -103,7 +108,7 @@ export class GpuRendererSlot<R extends LosableRenderer> {
     this.cancelTimer = null;
     this.cancelProbation?.();
     this.cancelProbation = null;
-    this.drop(true);
+    this.drop(true, this.opts.release);
     this.listeners.clear();
   }
 
@@ -116,7 +121,7 @@ export class GpuRendererSlot<R extends LosableRenderer> {
   }
 
   /** Aktuellen Renderer verwerfen; `free` nur, wenn das Objekt nicht gesperrt ist. */
-  private drop(healthy: boolean): void {
+  private drop(healthy: boolean, release?: (raw: R) => void): void {
     const raw = this.raw;
     const g = this.guarded;
     this.cancelProbation?.();
@@ -128,6 +133,10 @@ export class GpuRendererSlot<R extends LosableRenderer> {
     const intact = healthy && !g.dead();
     g.kill();
     if (!intact) return;
+    if (release) {
+      release(raw);
+      return;
+    }
     try {
       raw.free?.();
     } catch {

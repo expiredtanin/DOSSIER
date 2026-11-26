@@ -121,6 +121,8 @@ fn notify_lost(id: u32, why: &str) {
 /// und die aktuelle Kamera. Wird per `WebModelRenderer.new(canvas)` aus JS erzeugt.
 #[wasm_bindgen]
 pub struct WebModelRenderer {
+    /// [333] Bleibt, damit `attach_canvas` eine neue Surface am selben Gerät anlegen kann.
+    instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -282,6 +284,7 @@ impl WebModelRenderer {
         )));
 
         Ok(WebModelRenderer {
+            instance,
             surface,
             device,
             queue,
@@ -294,6 +297,24 @@ impl WebModelRenderer {
             id,
             health,
         })
+    }
+
+    /// [333] An einen neuen Canvas hängen (gleiches Gerät, gleiche Szene und GPU-Puffer): die 3D-Ansicht wird beim
+    /// Tab-Wechsel nicht neu aufgebaut (`useWasm3dRenderer` parkt den Renderer beim Schliessen). Grösse aus dem Canvas.
+    pub fn attach_canvas(&mut self, canvas: HtmlCanvasElement) -> Result<(), JsValue> {
+        if self.is_lost() {
+            return Err(JsValue::from_str("render3d: Gerät verloren"));
+        }
+        let (width, height) = (canvas.width().max(1), canvas.height().max(1));
+        let surface = self
+            .instance
+            .create_surface(wgpu::SurfaceTarget::Canvas(canvas))
+            .map_err(|e| JsValue::from_str(&format!("create_surface: {e:?}")))?;
+        self.config.width = width;
+        self.config.height = height;
+        surface.configure(&self.device, &self.config);
+        self.surface = surface;
+        Ok(())
     }
 
     /// true, sobald das WebGPU-Geraet verloren ist: dann zeichnet dieser Renderer nichts mehr,

@@ -40,7 +40,7 @@ class Fake implements LosableRenderer {
   }
 }
 
-function setup(opts: { probationMs?: number; maxLosses?: number; failCreate?: (k: number) => boolean } = {}) {
+function setup(opts: { probationMs?: number; maxLosses?: number; failCreate?: (k: number) => boolean; release?: (r: Fake) => void } = {}) {
   const made: Fake[] = [];
   const warnings: string[] = [];
   /** Zeitgeber von Hand: [ms, fn]. */
@@ -65,6 +65,7 @@ function setup(opts: { probationMs?: number; maxLosses?: number; failCreate?: (k
     },
     warn: (m) => warnings.push(m),
     info: () => {},
+    ...(opts.release ? { release: opts.release } : {}),
   });
   const delays: number[] = [];
   /** Mikrotasks abarbeiten und fällige Zeitgeber (alle) auslösen. */
@@ -102,6 +103,23 @@ describe("GpuRendererSlot", () => {
     expect(delays).toEqual([100]);
     expect(slot.ready).toBe(true);
     expect(seen.at(-1)).toBe(made[1]);
+  });
+
+  it("[333] Abbau mit `release`: intakter Renderer geht an den Aufrufer statt `free`, ein verlorener nicht", async () => {
+    const released: Fake[] = [];
+    const a = setup({ release: (r) => released.push(r) });
+    a.slot.start();
+    await a.settle(1);
+    a.slot.dispose();
+    expect(released).toEqual([a.made[0]]);
+    expect(a.made[0].freed).toBe(false);
+    const b = setup({ release: (r) => released.push(r) });
+    b.slot.start();
+    await b.settle(1);
+    b.made[0].lost = true;
+    b.slot.renderer!.render(); // Abbruch: Hülle tot
+    b.slot.dispose();
+    expect(released).toHaveLength(1);
   });
 
   it("Abbruch (Panic) mitten im Aufruf: gesperrtes Objekt nie wieder angefasst, auch nicht free", async () => {

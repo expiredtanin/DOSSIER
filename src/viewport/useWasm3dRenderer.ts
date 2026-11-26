@@ -203,10 +203,61 @@ interface WebModelRendererLike {
   is_lost?(): boolean;
   /** [206] Rückruf beim Geräteverlust (Argument: Grund + Meldung). Optional — ältere WASM-Builds. */
   set_lost_callback?(f: (why?: string) => void): void;
+  /** [333] An einen neuen Canvas hängen (gleiches Gerät, Szene bleibt; `web::attach_canvas`). Optional — ältere WASM-Builds. */
+  attach_canvas?(canvas: HTMLCanvasElement): void;
   free?(): void;
 }
 
-/** Neuen Renderer auf dem Canvas erzeugen (auch nach Geräteverlust: derselbe Canvas-Kontext). */
+/**
+ * [333] Geparkter Renderer: Schliesst man die 3D-Ansicht (Tab-Wechsel), wird er nicht freigegeben, sondern kurz
+ * aufbewahrt; öffnet man sie wieder, hängt er sich an den neuen Canvas (`attach_canvas`). Szene, GPU-Puffer und der
+ * Abgleich der Modell-Teile bleiben — statt alles neu zu vernetzen und hochzuladen (Grossgebäude ~1.2 s). Höchstens
+ * einer, nach {@link PARK_MS} ohne Wiederverwendung freigegeben (GPU-Speicher).
+ */
+const PARK_MS = 5 * 60_000;
+let parked: { r: WebModelRendererLike; timer: ReturnType<typeof setTimeout> } | null = null;
+
+function freeQuietly(r: WebModelRendererLike): void {
+  try {
+    r.free?.();
+  } catch {
+    /* bereits unbrauchbar */
+  }
+}
+
+function park(r: WebModelRendererLike): void {
+  if (typeof r.attach_canvas !== "function" || r.is_lost?.()) {
+    freeQuietly(r);
+    return;
+  }
+  if (parked) {
+    clearTimeout(parked.timer);
+    freeQuietly(parked.r);
+  }
+  const timer = setTimeout(() => {
+    if (parked?.r === r) parked = null;
+    freeQuietly(r);
+  }, PARK_MS);
+  parked = { r, timer };
+}
+
+/** Geparkten Renderer an `canvas` hängen; null, wenn keiner da ist oder das Anhängen scheitert. */
+function unpark(canvas: HTMLCanvasElement): WebModelRendererLike | null {
+  const p = parked;
+  if (!p) return null;
+  parked = null;
+  clearTimeout(p.timer);
+  try {
+    if (p.r.is_lost?.()) throw new Error("verloren");
+    p.r.attach_canvas!(canvas);
+    return p.r;
+  } catch {
+    freeQuietly(p.r);
+    return null;
+  }
+}
+
+/** Neuen Renderer auf dem Canvas erzeugen (auch nach Geräteverlust: derselbe Canvas-Kontext) oder den geparkten anhängen. */
 async function createRenderer(canvas: HTMLCanvasElement): Promise<WebModelRendererLike> {
   const mod = await loadEngine3d();
   // Canvas VOR dem Surface-Erzeugen auf die Zielpixel (DPR) bringen.
@@ -214,7 +265,7 @@ async function createRenderer(canvas: HTMLCanvasElement): Promise<WebModelRender
   const dpr = window.devicePixelRatio || 1;
   canvas.width = Math.max(1, Math.round(rect.width * dpr));
   canvas.height = Math.max(1, Math.round(rect.height * dpr));
-  return (await mod.WebModelRenderer.new(canvas)) as WebModelRendererLike;
+  return unpark(canvas) ?? ((await mod.WebModelRenderer.new(canvas)) as WebModelRendererLike);
 }
 
 /**
@@ -227,14 +278,21 @@ const slots = new WeakMap<HTMLCanvasElement, { slot: GpuRendererSlot<WebModelRen
 function slotFor(canvas: HTMLCanvasElement): { slot: GpuRendererSlot<WebModelRendererLike>; users: number } {
   let e = slots.get(canvas);
   if (!e) {
-    e = { slot: new GpuRendererSlot<WebModelRendererLike>({ label: "render3d", create: () => createRenderer(canvas) }), users: 0 };
+    e = { slot: new GpuRendererSlot<WebModelRendererLike>({ label: "render3d", create: () => createRenderer(canvas), release: park }), users: 0 };
     slots.set(canvas, e);
   }
   return e;
 }
 
-/** Was jeder Renderer schon an Modell-Teilen hat ([58]). */
-const partsSyncs = new WeakMap<object, Model3dPartsSync>();
+/**
+ * Was jeder Renderer schon an Modell-Teilen hat ([58]). [333] Als Eigenschaft am wasm-Objekt selbst (nicht in einer
+ * WeakMap über die Schutzhülle): ein geparkter, wiederverwendeter Renderer bekommt eine neue Hülle, behält aber den
+ * Abgleich — beim Wiederöffnen reisen nur Änderungen.
+ */
+const PARTS_SYNC = Symbol("render3d.partsSync");
+/** [333] Ebenso die hochgeladenen Punktwolken: der Abgleich entfernt beim Wiederverwenden, was nicht mehr dazugehört. */
+const POINT_CLOUDS = Symbol("render3d.pointClouds");
+type WithSync = WebModelRendererLike & { [PARTS_SYNC]?: Model3dPartsSync; [POINT_CLOUDS]?: Map<number, UploadedPointCloud> };
 
 /**
  * Modell an den Renderer: ohne Explosion als Teil-Update (nur geänderte Wände/Öffnungen/Gruppen reisen
@@ -242,8 +300,9 @@ const partsSyncs = new WeakMap<object, Model3dPartsSync>();
  * einem Fehler das ganze Modell über `set_model`.
  */
 function syncModel3d(r: WebModelRendererLike, project: Project, detail: DetailLevel | undefined, explode: number, hide?: Hide3d): void {
-  let sync = partsSyncs.get(r);
-  if (!sync) partsSyncs.set(r, (sync = new Model3dPartsSync()));
+  const holder = r as WithSync;
+  let sync = holder[PARTS_SYNC];
+  if (!sync) holder[PARTS_SYNC] = sync = new Model3dPartsSync();
   try {
     const parts = typeof r.set_parts === "function" ? projectToModel3dParts(project, { detail, voids: true, explode, hide }) : null;
     if (parts) {
@@ -292,7 +351,8 @@ export function useWasm3dRenderer(
         rendererRef.current = r;
         ghostSyncRef.current.reset();
         // Neuer Renderer: Punktwolken, Materialien, Luftbild und Pathtracer-Tabelle neu abgleichen.
-        pointCloudsRef.current = new Map();
+        const holder = r as WithSync | null;
+        pointCloudsRef.current = holder ? (holder[POINT_CLOUDS] ??= new Map()) : new Map();
         materialSigRef.current = null;
         aerialSigRef.current = null;
         ptMaterialsRef.current = null;
