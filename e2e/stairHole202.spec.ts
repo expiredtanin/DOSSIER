@@ -78,3 +78,27 @@ test("Wendeltreppe ziehen: Deckenloch wandert mit, im EG weiterhin sichtbar", as
   const end = await info(page);
   expect(Math.abs(end.hole0!.x - before.hole0!.x) + Math.abs(end.hole0!.y - before.hole0!.y)).toBeLessThan(1e-9);
 });
+
+// [333] Gerade Treppe: Griffe an allen vier Ecken (Wunsch Maintainer); hintere Ecke ziehen ändert Breite und Lauflänge.
+test("Gerade Treppe: Ecken-Griff ändert Breite und Lauflänge", async ({ page }) => {
+  test.setTimeout(150_000);
+  await openComplex(page);
+  await openTab(page, "Zeichnungsebenen");
+  await nav(page, "Obergeschoss").click();
+  await page.waitForTimeout(800);
+  await blurFocus(page);
+  await page.evaluate(() => window.__dossierTest!.select({ stairs: ["tr-dg"] }));
+  await page.waitForTimeout(500);
+  // tr-dg: Start (10.6125, 9.6), Richtung −y, Lauf 3.9, Breite 1 → Austritt-Ecke (11.1125, 5.7).
+  const a = await screenOf(page, 11.1125, 5.7);
+  const b = await screenOf(page, 11.3125, 5.2);
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 4 });
+  await page.mouse.move(b.x, b.y, { steps: 4 });
+  await page.mouse.up();
+  const st = () => page.evaluate(() => window.__dossierTest!.heights().stairs.find((s) => s.id === "tr-dg")!);
+  // Der Fang kann den Zielpunkt an einen nahen Endpunkt ziehen: nur prüfen, dass beide Masse wachsen.
+  await expect.poll(async () => (await st()).width, { timeout: 10_000 }).toBeGreaterThan(1.02);
+  expect((await st()).runLength).toBeGreaterThan(3.95);
+});

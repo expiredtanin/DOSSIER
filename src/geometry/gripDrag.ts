@@ -212,7 +212,7 @@ export function stairMoveHandle(st: Stair): Vec2 {
 
 /**
  * [151] Parameter-Griffe einer Podesttreppe (L, U, gerade mit Podest): Ende Lauf 1, Ende letzter Lauf, bei
- * U / gerade mit Podest der Podestrand. Andere Formen: keine. Den Zug rechnet der Kern (Griff `stairParam`).
+ * U / gerade mit Podest der Podestrand; [333] gerade Treppe die vier Ecken. Wendeltreppe: keine. Den Zug rechnet der Kern (Griff `stairParam`).
  */
 export function stairParamPoints(st: Stair): Vec2[] {
   return points(core().grip_stair_param_points(encodeStair(st)));

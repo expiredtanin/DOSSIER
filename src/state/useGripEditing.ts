@@ -521,7 +521,8 @@ export function useGripEditing(opts: {
     if (selectedStairId && modelEditable) {
       const st = (project.stairs ?? []).find((s) => s.id === selectedStairId);
       if (!st) return [];
-      // [151] Podesttreppen: dazu die Parameter-Griffe (Lauf-Enden, Podestrand).
+      // [151] Podesttreppen: dazu die Parameter-Griffe (Lauf-Enden, Podestrand); [333] gerade Treppe: die vier Ecken
+      // (vorne Breite, hinten Breite + Lauflänge).
       const pts = [stairMoveHandle(st), ...stairParamPoints(st)];
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
       return pts;

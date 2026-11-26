@@ -491,7 +491,7 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
             let (index, (x, y)) = (r.n("index"), r.p("pt"));
             patch("stairs", r.s("id"), &|s| {
                 let st: crate::model::Stair = serde_json::from_value(s.clone()).ok()?;
-                let i = index_in(index, 3)?;
+                let i = index_in(index, 4)?;
                 let changes = crate::grip_drag::stair_param_drag(&st.encode(), i, (x, y));
                 if changes.is_empty() {
                     return None;
