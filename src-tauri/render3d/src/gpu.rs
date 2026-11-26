@@ -2645,14 +2645,20 @@ impl Renderer {
         // Punktwolken: Viewport/Punktgroesse in die Uniforms (feste Pixelgroesse).
         self.points.prepare(queue, (w, h));
 
-        // [333] Umgebungsverdeckung nur in den beleuchteten Flächen-Stilen (nicht Verdeckt/Konturen/Drahtgitter).
-        let ao_on = self.ssao.is_some() && self.ssao_on && self.style.draws_faces() && self.style.mesh_mode() < 1.5;
+        // [333] Umgebungsverdeckung nur in den beleuchteten Flächen-Stilen (nicht Verdeckt/Konturen/Drahtgitter); `ao_on`
+        // heisst hier „Nachbearbeitung an“ (Verdeckung und/oder Umriss, gleicher Ablauf mit zwei Durchgängen).
+        let ao_lit = self.ssao.is_some() && self.ssao_on && self.style.draws_faces() && self.style.mesh_mode() < 1.5;
+        // [333] Umrisslinie (Silhouette kräftig) in den Stilen mit Kanten, die Flächen zeichnen.
+        let outline_on = self.ssao.is_some()
+            && self.style.draws_faces()
+            && (self.style.draws_edges() || self.style == RenderStyle::Contour);
+        let ao_on = ao_lit || outline_on;
         let ao_u = ao_on.then(|| {
             let proj = crate::math::projection_matrix(camera, aspect);
             let d = crate::math::sub(camera.target, camera.eye);
             let perspective = matches!(camera.projection, crate::types::Projection::Perspective);
             let dist = if perspective { crate::math::length(d) } else { camera.ortho_half_height * 2.0 };
-            crate::ssao::uniform(&proj, perspective, dist, (w, h))
+            crate::ssao::uniform(&proj, perspective, dist, (w, h), ao_lit, outline_on)
         });
         let depth_view = &self.depth.as_ref().unwrap().view;
         let msaa_view = &self.msaa.as_ref().unwrap().view;
