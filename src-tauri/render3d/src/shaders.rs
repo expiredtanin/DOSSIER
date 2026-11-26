@@ -600,6 +600,33 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// [333] Schattenfänger-Boden (`gpu::ground_pipeline`): eine Fläche knapp unter der Erdgeschoss-Höhe, wenn das
+/// Projekt kein Gelände hat — in der Hintergrundfarbe (Vertexfarbe), also unsichtbar, ausser wo Sonnenschatten
+/// (`sun_visibility` des Material-Shaders) und die Umgebungsverdeckung auf sie fallen: die Häuser stehen auf dem Boden
+/// statt über dem Raster zu schweben. Kopf (Globals, Schattenkarten, Vertex-Shader) aus [`MESH_WGSL`].
+pub fn ground_wgsl() -> String {
+    let head = &MESH_WGSL[..MESH_WGSL.find("@fragment").unwrap_or(MESH_WGSL.len())];
+    format!("{head}{GROUND_FS_WGSL}")
+}
+
+const GROUND_FS_WGSL: &str = r#"
+@fragment
+fn fs_ground(in : VsOut) -> @location(0) vec4<f32> {
+    if (globals.mode.y > 0.5) {
+        if (dot(in.world_pos, globals.section_plane.xyz) + globals.section_plane.w > 0.0) {
+            discard;
+        }
+    }
+    let n = vec3<f32>(0.0, 1.0, 0.0);
+    let l = normalize(globals.light_dir.xyz);
+    var shade = 1.0;
+    if (globals.shadow.x > 0.5 && l.y > 0.0) {
+        shade = 1.0 - 0.3 * (1.0 - sun_visibility(in.world_pos, n, l));
+    }
+    return vec4<f32>(in.color * shade, 1.0);
+}
+"#;
+
 /// [333] WGSL des Bodengitters (`grid::build_ground_grid`, gpu `ground_grid_pipeline`): eine Fläche, die Linien je
 /// Pixel aus der Weltlage — Abstand zur nächsten Linie in Bildschirm-Pixeln (`fwidth`), daraus eine geglättete
 /// Deckung von etwa einem Pixel Breite. Meter- und 5-m-Linien je für sich; beide blenden aus, sobald ihre Linien
@@ -686,7 +713,9 @@ fn fs_main(in : VsOut) -> FsOut {
     let col = (MAJOR_COLOR * a_major + MINOR_COLOR * a_minor) / a;
     var out : FsOut;
     out.color = vec4<f32>(col, a);
-    out.depth = 1.0;
+    // Mit Schattenfänger-Boden (mode.w, kein Gelände) liegt das Gitter auf ihm (eigene Tiefe, Bauten verdecken es);
+    // sonst nur im leeren Hintergrund.
+    out.depth = select(1.0, in.clip_pos.z, globals.mode.w > 0.5);
     return out;
 }
 "#;

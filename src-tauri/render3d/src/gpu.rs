@@ -222,26 +222,28 @@ pub(crate) fn camera_light(camera: &Camera) -> [f32; 3] {
     [-0.45 * fx + 0.75 * sx, 1.2, -0.45 * fz + 0.75 * sz]
 }
 
-/// [333] Richtung ZUM Aufhelllicht: mit Sonne (oder fester Lichtrichtung) von oben links hinter dem Betrachter wie
-/// [`camera_light`] — die Schattenseiten bekommen je nach Lage verschiedene Töne; folgt schon das Hauptlicht der
-/// Kamera (von links), kommt das Aufhelllicht spiegelbildlich von rechts.
-pub(crate) fn camera_fill(camera: &Camera, fixed_key: bool) -> [f32; 3] {
+/// [333] Richtung ZUM Aufhelllicht: flach von oben hinter dem Betrachter, auf der Bildseite GEGENÜBER dem Hauptlicht
+/// `key` (Sonne, feste Richtung oder das Kamera-Licht von links): die Seite, die das Hauptlicht nicht trifft, wird
+/// aufgehellt — sonst blieb sie bei Sonne von links fast schwarz (Wettbewerbsbeispiel). Hauptlicht genau von vorn oder
+/// hinten: von links.
+pub(crate) fn camera_fill(camera: &Camera, key: [f32; 3]) -> [f32; 3] {
     // Flach (Höhe 0.3 statt 1.2): hellt vor allem die senkrechten Flächen auf, Böden und Dächer kaum (sie bleichten
     // sonst aus: die Parzelle wurde fast weiss).
     let k = camera_light(camera);
     let l = [k[0], 0.3, k[2]];
-    if fixed_key {
-        return l;
-    }
-    // Spiegeln an der Blickebene: links ↔ rechts (der Anteil quer zum Blick wechselt das Vorzeichen).
     let d = [camera.target[0] - camera.eye[0], camera.target[2] - camera.eye[2]];
     let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
-    if !(len > 1e-6) {
-        return [-l[0], l[1], -l[2]];
+    if !(len > 1e-6) || !key.iter().all(|v| v.is_finite()) {
+        return l;
     }
     let (fx, fz) = (d[0] / len, d[1] / len);
     let (rx, rz) = (-fz, fx);
     let side = l[0] * rx + l[2] * rz;
+    let key_side = key[0] * rx + key[2] * rz;
+    if key_side.abs() < 1e-3 || key_side * side < 0.0 {
+        return l;
+    }
+    // Spiegeln an der Blickebene: links ↔ rechts (der Anteil quer zum Blick wechselt das Vorzeichen).
     [l[0] - 2.0 * side * rx, l[1], l[2] - 2.0 * side * rz]
 }
 
@@ -485,6 +487,11 @@ pub struct Renderer {
     /// Teilt sich das `Globals`-Uniform/Bind-Group (nur View-Projektion) mit der
     /// Mesh-Pipeline und rendert in denselben Pass/Tiefenpuffer.
     grid_pipeline: wgpu::RenderPipeline,
+    /// [333] Schattenfänger-Boden ohne Gelände (`ground_wgsl`): Pipeline, Fläche, Schlüssel (Lage/Grösse/Farbe), Höhe.
+    ground_pipeline: wgpu::RenderPipeline,
+    ground: Option<MeshBuffers>,
+    ground_key: Option<[i32; 8]>,
+    ground_elevation: f32,
     /// [333] Umgebungsverdeckung (beleuchtete Stile) und ob sie an ist (`set_ambient_occlusion`).
     /// `None` unter GL (dort liest wgpu keine Tiefentexturen per `textureLoad`).
     ssao: Option<crate::ssao::Ssao>,
@@ -912,6 +919,35 @@ impl Renderer {
                 clamp: 0.0,
             },
         );
+
+        // [333] Schattenfänger-Boden: wie die Flächen, eigener Fragment-Shader, beidseitig, nach hinten gebiast
+        // (Decken/Bodenplatten auf gleicher Höhe gewinnen).
+        let ground_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("ground.wgsl"),
+            source: wgpu::ShaderSource::Wgsl(crate::shaders::ground_wgsl().into()),
+        });
+        let ground_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("ground.pipeline"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState { module: &ground_module, entry_point: Some("vs_main"), buffers: &[vertex_layout.clone()], compilation_options: Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &ground_module,
+                entry_point: Some("fs_ground"),
+                targets: &[Some(wgpu::ColorTargetState { format: color_format, blend: Some(wgpu::BlendState::REPLACE), write_mask: wgpu::ColorWrites::ALL })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState { constant: 8, slope_scale: 2.0, clamp: 0.0 },
+            }),
+            multisample: wgpu::MultisampleState { count: SAMPLE_COUNT, mask: !0, alpha_to_coverage_enabled: false },
+            multiview_mask: None,
+            cache: None,
+        });
 
         // Bodengitter-Pipeline: dieselbe Bind-Group (Globals/View-Projektion) und
         // dasselbe Depth-/MSAA-/Farbziel wie die Mesh-Pipeline, aber LineList-
@@ -1572,6 +1608,10 @@ impl Renderer {
             pipeline,
             hidden_face_pipeline,
             grid_pipeline,
+            ground_pipeline,
+            ground: None,
+            ground_key: None,
+            ground_elevation: 0.0,
             ssao: (device.adapter_info().backend != wgpu::Backend::Gl)
                 .then(|| crate::ssao::Ssao::new(device, color_format, DEPTH_FORMAT, SAMPLE_COUNT)),
             ssao_on: true,
@@ -1833,6 +1873,11 @@ impl Renderer {
 
     /// Werden im naechsten Frame Schatten gezeichnet (Sonne ueber dem Horizont, Schalter an,
     /// beleuchteter Stil, Modell vorhanden)?
+    /// [333] Schattenfänger-Boden: in den Flächen-Stilen mit deckendem Hintergrund, wenn kein Gelände da ist.
+    fn ground_catcher_on(&self) -> bool {
+        self.style.draws_faces() && self.clear_color.a >= 0.999 && self.scene.terrain().indices.is_empty()
+    }
+
     pub fn shadows_active(&self) -> bool {
         self.sun.is_some()
             && self.shadows_on
@@ -1890,6 +1935,7 @@ impl Renderer {
         spacing: f32,
     ) {
         self.grid_visible = visible;
+        self.ground_elevation = if elevation.is_finite() { elevation } else { 0.0 };
         let verts = build_ground_grid(elevation, extent, spacing);
         if verts.is_empty() {
             self.grid = None;
@@ -2338,9 +2384,13 @@ impl Renderer {
         if !self.shadows_active() {
             return false;
         }
-        let (Some(sun), Some(bounds)) = (self.sun, self.scene.shadow_bounds()) else {
+        let (Some(sun), Some(mut bounds)) = (self.sun, self.scene.shadow_bounds()) else {
             return false;
         };
+        // [333] Schattenfänger-Boden: Kaskade 1 reicht bis zu den Schatten der Bauten auf dem Boden.
+        if self.ground_catcher_on() {
+            bounds = crate::shadow::with_ground_footprint(&bounds, sun, self.ground_elevation - 0.02);
+        }
         let max = device.limits().max_texture_dimension_2d.max(1);
         let size = self.shadow_size.min(max).max(1);
         // Nahsicht: Kaskade 0 auf den sichtbaren Teil des Gebaeudes, Kaskade 1 fuer den Rest.
@@ -2530,7 +2580,36 @@ impl Renderer {
         if self.sun.is_none() && self.light_follows_camera {
             self.globals.light_dir = normalize4(camera_light(camera));
         }
-        self.globals.fill_dir = normalize4(camera_fill(camera, self.sun.is_some() || !self.light_follows_camera));
+        let key = self.globals.light_dir;
+        self.globals.fill_dir = normalize4(camera_fill(camera, [key[0], key[1], key[2]]));
+        // [333] Schattenfänger-Boden: nur ohne Gelände, mit deckendem Hintergrund (nicht beim Bild-Export mit
+        // Transparenz) und in den Flächen-Stilen; Grösse aus der Modell-Ausdehnung (mindestens 300 m), Farbe = Hintergrund.
+        let ground_on = self.ground_catcher_on();
+        if ground_on {
+            let (c, half) = match self.scene.bounds() {
+                Some((lo, hi)) => {
+                    let d = ((hi[0] - lo[0]).powi(2) + (hi[2] - lo[2]).powi(2)).sqrt();
+                    ([(lo[0] + hi[0]) * 0.5, (lo[2] + hi[2]) * 0.5], (2.0 * d).max(150.0))
+                }
+                None => ([0.0, 0.0], 150.0),
+            };
+            let y = self.ground_elevation - 0.02;
+            let col = [self.clear_color.r as f32, self.clear_color.g as f32, self.clear_color.b as f32];
+            let key = [c[0] as i32, c[1] as i32, half as i32, (y * 1000.0) as i32, (col[0] * 255.0) as i32, (col[1] * 255.0) as i32, (col[2] * 255.0) as i32, 0];
+            if self.ground_key != Some(key) {
+                let mut verts = Vec::with_capacity(4 * crate::types::FLOATS_PER_VERTEX);
+                for (x, z) in [(-half, -half), (half, -half), (half, half), (-half, half)] {
+                    verts.extend_from_slice(&[c[0] + x, y, c[1] + z, 0.0, 1.0, 0.0, col[0], col[1], col[2]]);
+                }
+                self.ground = Some(MeshBuffers {
+                    vbo: vertex_buffer(device, "ground.vbo", &verts),
+                    ibo: index_buffer(device, "ground.ibo", &[0, 1, 2, 0, 2, 3]),
+                    index_count: 6,
+                });
+                self.ground_key = Some(key);
+            }
+        }
+        self.globals.mode[3] = if ground_on { 1.0 } else { 0.0 };
         // `mode.x` fuer den Mesh-Shader aus dem aktuellen Stil ableiten (Material/
         // Clay/Hidden-Flaechen). Wireframe zeichnet keine Flaechen -> Wert egal.
         self.globals.mode[0] = self.style.mesh_mode();
@@ -2658,7 +2737,8 @@ impl Renderer {
             let d = crate::math::sub(camera.target, camera.eye);
             let perspective = matches!(camera.projection, crate::types::Projection::Perspective);
             let dist = if perspective { crate::math::length(d) } else { camera.ortho_half_height * 2.0 };
-            crate::ssao::uniform(&proj, perspective, dist, (w, h), ao_lit, outline_on)
+            let ground = ground_on.then(|| crate::ssao::view_ground_plane(&crate::math::view_matrix(camera), self.ground_elevation - 0.02));
+            crate::ssao::uniform(&proj, perspective, dist, (w, h), ao_lit, outline_on, ground)
         });
         let depth_view = &self.depth.as_ref().unwrap().view;
         let msaa_view = &self.msaa.as_ref().unwrap().view;
@@ -2752,6 +2832,17 @@ impl Renderer {
                         pass.draw_indexed(0..m.index_count, 0, 0..1);
                         st.add(m.index_count);
                     }
+                }
+            }
+
+            // [333] Schattenfänger-Boden nach den Flächen (nur wo nichts davor liegt).
+            if ground_on {
+                if let Some(g) = &self.ground {
+                    pass.set_pipeline(&self.ground_pipeline);
+                    pass.set_bind_group(0, &self.bind_group, &[]);
+                    pass.set_vertex_buffer(0, g.vbo.slice(..));
+                    pass.set_index_buffer(g.ibo.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..g.index_count, 0, 0..1);
                 }
             }
 
@@ -3186,17 +3277,21 @@ mod camera_light_tests {
         assert!(bad.iter().all(|v| v.is_finite()));
     }
 
-    /// [333] Aufhelllicht: mit Sonne wie das Kamera-Licht (links), sonst spiegelbildlich von rechts.
+    /// [333] Aufhelllicht gegenüber dem Hauptlicht: folgt dieses der Kamera (links), kommt es von rechts; Sonne von
+    /// rechts → von links, Sonne von links → von rechts; immer flacher als das Hauptlicht.
     #[test]
-    fn aufhelllicht_links_oder_rechts() {
-        let c = cam([20.0, 12.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]); // Blick nach −x, rechts = −z
+    fn aufhelllicht_gegenueber_dem_hauptlicht() {
+        let c = cam([20.0, 12.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]); // Blick nach −x
         let l = camera_light(&c);
-        let same = super::camera_fill(&c, true);
-        assert_eq!((same[0], same[2]), (l[0], l[2]), "mit Sonne: gleiche Seite wie das Kamera-Licht");
-        assert!(same[1] < 0.5 * l[1], "flacher als das Hauptlicht");
-        let f = super::camera_fill(&c, false);
-        assert!(l[2] < -0.5 && f[2] > 0.5, "Seiten gespiegelt: {l:?} {f:?}");
-        assert!((f[0] - l[0]).abs() < 1e-6);
+        let f = super::camera_fill(&c, l);
+        assert!(l[2] < -0.5 && f[2] > 0.5, "Kamera-Licht ↔ Aufhelllicht gespiegelt: {l:?} {f:?}");
+        assert!(f[1] < 0.5 * l[1], "flacher als das Hauptlicht");
+        let sun_like_l = [0.0, 1.0, -1.0];
+        assert!(super::camera_fill(&c, sun_like_l)[2] > 0.5, "Sonne auf der Seite des Kamera-Lichts → gegenüber");
+        let sun_other = [0.0, 1.0, 1.0];
+        assert!(super::camera_fill(&c, sun_other)[2] < -0.5, "Sonne gegenüber → Seite des Kamera-Lichts");
+        let sun_front = [1.0, 1.0, 0.0];
+        assert!(super::camera_fill(&c, sun_front)[2] < -0.5, "Sonne von vorn → von links");
     }
 }
 

@@ -246,6 +246,42 @@ pub fn far_cascade_needed(b: &ShadowBounds) -> bool {
     [0, 2].iter().any(|&i| b.focus.0[i] < b.core.0[i] - 2.0 || b.focus.1[i] > b.core.1[i] + 2.0) || b.focus.1[1] > b.core.1[1] + 2.0
 }
 
+/// [333] Schattenfänger-Boden (`gpu`, ohne Gelände): Die Schlagschatten aller Bauteile fallen auf die Ebene
+/// `y = ground_y`, meist ausserhalb der Bauteil-Boxen. Ergänzt `focus` (Kaskade 1) und `all` (Tiefenbereich) um den
+/// Schatten-Abdruck der ganzen Szene auf dieser Ebene; bei flacher Sonne höchstens 4× die Höhe weit.
+pub fn with_ground_footprint(b: &ShadowBounds, dir_to_light: [f32; 3], ground_y: f32) -> ShadowBounds {
+    let l = normalize(dir_to_light);
+    if !(l[1] > 1e-3) || !ground_y.is_finite() {
+        return *b;
+    }
+    let reach = 4.0f32;
+    let horiz = normalize([l[0], 0.0, l[2]]);
+    let tan = (l[0] * l[0] + l[2] * l[2]).sqrt() / l[1];
+    let (mut lo, mut hi) = (b.focus.0, b.focus.1);
+    let (alo, ahi) = b.all;
+    for i in 0..8 {
+        let p = [
+            if i & 1 == 0 { alo[0] } else { ahi[0] },
+            if i & 2 == 0 { alo[1] } else { ahi[1] },
+            if i & 4 == 0 { alo[2] } else { ahi[2] },
+        ];
+        let h = (p[1] - ground_y).max(0.0);
+        // Horizontal um h · |l_xz| / l_y verschoben, höchstens `reach` · h.
+        let run = (h * tan).min(reach * h);
+        let q = [p[0] - horiz[0] * run, ground_y, p[2] - horiz[2] * run];
+        for k2 in 0..3 {
+            lo[k2] = lo[k2].min(q[k2]).min(p[k2]);
+            hi[k2] = hi[k2].max(q[k2]).max(p[k2]);
+        }
+    }
+    let mut all = b.all;
+    for k2 in 0..3 {
+        all.0[k2] = all.0[k2].min(lo[k2]);
+        all.1[k2] = all.1[k2].max(hi[k2]);
+    }
+    ShadowBounds { core: b.core, focus: (lo, hi), all }
+}
+
 /// Weltgroesse eines Schatten-Texels (Meter) fuer die Normalen-Verschiebung gegen Schattenakne:
 /// die groessere Seite des Licht-Frustums durch die Textur-Kantenlaenge.
 pub fn texel_world_size(light: &Mat4, size: u32) -> f32 {
@@ -521,5 +557,22 @@ mod tests {
         assert_eq!(caster_indices(&verts, &idx), vec![0, 1, 2]);
         assert_eq!(verts_bounds(&verts, 3), Some(([0.0; 3], [0.0; 3])));
         assert_eq!(verts_bounds(&verts, 6), None);
+    }
+
+    /// [333] Schatten-Abdruck auf dem Boden: Sonne von +x unter 45°, Würfel 10 m hoch → Kaskade 1 reicht 10 m nach −x.
+    #[test]
+    fn bodenabdruck_erweitert_kaskade_eins() {
+        let bx: Bounds3 = ([0.0, 0.0, 0.0], [5.0, 10.0, 5.0]);
+        let b = ShadowBounds { core: bx, focus: bx, all: bx };
+        let g = with_ground_footprint(&b, [1.0, 1.0, 0.0], 0.0);
+        assert!((g.focus.0[0] + 10.0).abs() < 1e-4, "{:?}", g.focus);
+        assert_eq!(g.focus.1, bx.1);
+        assert_eq!(g.core, bx);
+        assert!(g.all.0[0] <= -10.0 + 1e-4);
+        // Flache Sonne: höchstens 4× die Höhe.
+        let f = with_ground_footprint(&b, [1.0, 0.01, 0.0], 0.0);
+        assert!((f.focus.0[0] + 40.0).abs() < 1e-3, "{:?}", f.focus);
+        // Sonne unter dem Horizont: unverändert.
+        assert_eq!(with_ground_footprint(&b, [1.0, -0.5, 0.0], 0.0), b);
     }
 }

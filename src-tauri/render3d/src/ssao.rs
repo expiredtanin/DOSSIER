@@ -22,8 +22,11 @@ pub(crate) struct AoUniform {
     pub params: [f32; 4],
     /// xy = volle Grösse (px), zw = AO-Grösse (px).
     pub size: [f32; 4],
-    /// [333] x = AO an (1/0), y = Umriss an (1/0), z = Umriss-Stärke (0..1), w = frei.
+    /// [333] x = AO an (1/0), y = Umriss an (1/0), z = Umriss-Stärke (0..1), w = Bodenebene gültig (1/0).
     pub flags: [f32; 4],
+    /// [333] Schattenfänger-Boden als Ebene im Kameraraum (xyz Normale, w Abstand): dort kein Umriss (sonst Linie am
+    /// Rand der unsichtbaren Bodenfläche und Streifen, wo der flache Boden schräg wegläuft).
+    pub ground: [f32; 4],
 }
 
 /// Gemeinsamer Kopf beider Shader.
@@ -34,6 +37,7 @@ struct AoU {
     params   : vec4<f32>,
     size     : vec4<f32>,
     flags    : vec4<f32>,
+    ground   : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u : AoU;
 @group(0) @binding(1) var depth_ms : texture_depth_multisampled_2d;
@@ -96,6 +100,10 @@ fn fs_ao(in : VsOut) -> @location(0) vec4<f32> {
     let dx = select(pr - p, p - pl, abs(pl.z - p.z) < abs(pr.z - p.z));
     let dy = select(pd - p, p - pu, abs(pu.z - p.z) < abs(pd.z - p.z));
     var n = normalize(cross(dx, dy));
+    // [333] Auf dem Schattenfänger-Boden die genaue Normale (die geschätzte rauscht in der Ferne: Streifen).
+    if (u.flags.w > 0.5 && abs(dot(u.ground.xyz, p) + u.ground.w) < 0.03 + 0.002 * abs(p.z)) {
+        n = u.ground.xyz;
+    }
     let to_eye = select(vec3<f32>(0.0, 0.0, 1.0), -p, u.params.w > 0.5);
     if (dot(n, to_eye) < 0.0) {
         n = -n;
@@ -151,7 +159,12 @@ fn fs_outline(in : VsOut) -> @location(0) vec4<f32> {
     if (depth_at(fp) >= 1.0) {
         return vec4<f32>(1.0);
     }
-    let zc = view_at(fp).z;
+    let pc = view_at(fp);
+    let zc = pc.z;
+    // Bodenebene (Schattenfänger): keine Linie auf dem Boden selbst; die Kante der Bauten davor bleibt (deren Pixel).
+    if (u.flags.w > 0.5 && abs(dot(u.ground.xyz, pc) + u.ground.w) < 0.03 + 0.002 * abs(zc)) {
+        return vec4<f32>(1.0);
+    }
     // Toleranz wächst mit der Entfernung (Tiefenauflösung) und mit dem Pixel-Abstand der Probe (schräge Flächen).
     let tol = 0.03 * abs(zc) + 0.04;
     var edge = 0.0;
@@ -180,6 +193,7 @@ struct AoU {
     params   : vec4<f32>,
     size     : vec4<f32>,
     flags    : vec4<f32>,
+    ground   : vec4<f32>,
 };
 @group(0) @binding(0) var<uniform> u : AoU;
 @group(0) @binding(1) var ao_tex : texture_2d<f32>;
@@ -260,7 +274,15 @@ pub(crate) fn ao_radius(view_dist: f32) -> f32 {
 pub(crate) const OUTLINE_STRENGTH: f32 = 0.82;
 
 /// Uniform für ein Bild: `ao`/`outline` = welche Wirkungen an sind.
-pub(crate) fn uniform(proj: &Mat4, perspective: bool, view_dist: f32, full: (u32, u32), ao: bool, outline: bool) -> AoUniform {
+pub(crate) fn uniform(
+    proj: &Mat4,
+    perspective: bool,
+    view_dist: f32,
+    full: (u32, u32),
+    ao: bool,
+    outline: bool,
+    ground: Option<[f32; 4]>,
+) -> AoUniform {
     let (aw, ah) = ao_size(full.0, full.1);
     let r = ao_radius(view_dist);
     AoUniform {
@@ -268,8 +290,18 @@ pub(crate) fn uniform(proj: &Mat4, perspective: bool, view_dist: f32, full: (u32
         inv_proj: crate::math::invert(proj).unwrap_or_else(crate::math::identity),
         params: [r, 1.1, 0.04 * r, if perspective { 1.0 } else { 0.0 }],
         size: [full.0 as f32, full.1 as f32, aw as f32, ah as f32],
-        flags: [f32::from(u8::from(ao)), f32::from(u8::from(outline)), OUTLINE_STRENGTH, 0.0],
+        flags: [f32::from(u8::from(ao)), f32::from(u8::from(outline)), OUTLINE_STRENGTH, f32::from(u8::from(ground.is_some()))],
+        ground: ground.unwrap_or([0.0; 4]),
     }
+}
+
+/// [333] Waagrechte Ebene `y = elevation` (Welt) als Ebene im Kameraraum: (Normale, Abstand) mit `n·p + d = 0`.
+pub(crate) fn view_ground_plane(view: &Mat4, elevation: f32) -> [f32; 4] {
+    let n4 = crate::math::transform_point(view, [0.0, 1.0, 0.0]);
+    let o4 = crate::math::transform_point(view, [0.0, 0.0, 0.0]);
+    let p4 = crate::math::transform_point(view, [0.0, elevation, 0.0]);
+    let n = crate::math::normalize([n4[0] - o4[0], n4[1] - o4[1], n4[2] - o4[2]]);
+    [n[0], n[1], n[2], -crate::math::dot(n, [p4[0], p4[1], p4[2]])]
 }
 
 /// Format der Umriss-Textur (volle Auflösung).
@@ -546,7 +578,7 @@ mod tests {
     #[test]
     fn uniform_kehrt_die_projektion_um() {
         let p = crate::math::perspective(0.8, 1.5, 0.1, 500.0);
-        let u = uniform(&p, true, 20.0, (300, 200), true, false);
+        let u = uniform(&p, true, 20.0, (300, 200), true, false, None);
         assert_eq!(u.flags, [1.0, 0.0, OUTLINE_STRENGTH, 0.0]);
         let m = crate::math::mul(&u.proj, &u.inv_proj);
         for (i, v) in m.iter().enumerate() {
@@ -554,6 +586,19 @@ mod tests {
             assert!((v - want).abs() < 1e-4, "P·P⁻¹[{i}] = {v}");
         }
         assert_eq!(u.size, [300.0, 200.0, 150.0, 100.0]);
+    }
+
+    /// Bodenebene im Kameraraum: Punkte auf `y = h` liegen auf ihr, darüber positiv.
+    #[test]
+    fn bodenebene_im_kameraraum() {
+        let v = crate::math::look_at([10.0, 8.0, 6.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]);
+        let g = view_ground_plane(&v, 1.5);
+        let at = |p: [f32; 3]| {
+            let q = crate::math::transform_point(&v, p);
+            g[0] * q[0] + g[1] * q[1] + g[2] * q[2] + g[3]
+        };
+        assert!(at([3.0, 1.5, -7.0]).abs() < 1e-4);
+        assert!((at([0.0, 3.5, 2.0]) - 2.0).abs() < 1e-4);
     }
 
     /// Beide Shader sind gültiges WGSL (naga).
