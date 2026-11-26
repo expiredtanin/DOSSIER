@@ -247,3 +247,33 @@ export function handleAnchors(r: RectMm): { handle: Handle; xMm: number; yMm: nu
     { handle: "w", xMm: x, yMm: cy },
   ];
 }
+
+/**
+ * [333] Bildmitte (Modell-Meter) nach dem Ändern der Rahmengrösse, sodass der Inhalt auf dem Papier liegen bleibt (wie
+ * InDesign: Rahmen nach unten ziehen zeigt mehr von unterhalb). Die Rahmenmitte wandert auf dem Papier um (Δx, Δy) mm;
+ * die Bildmitte um dasselbe im Modell (1:`scale`, Papier-y nach unten = Modell-y nach oben).
+ */
+export function resizedCenter(center: { x: number; y: number }, start: RectMm, next: RectMm, scale: number): { x: number; y: number } {
+  const m = scale / 1000;
+  const dx = next.xMm + next.widthMm / 2 - (start.xMm + start.widthMm / 2);
+  const dy = next.yMm + next.heightMm / 2 - (start.yMm + start.heightMm / 2);
+  return { x: center.x + dx * m, y: center.y - dy * m };
+}
+
+/**
+ * [333] `viewBox` des inneren Viewport-SVG, damit ein für den Rahmen `rendered` (Bildmitte `renderedCenter`) erzeugtes
+ * Bild im Rahmen `rect` mit Bildmitte `center` richtig liegt — beschnitten bzw. erweitert, nie gestreckt (Vorschau beim
+ * Ziehen, und bis das neue Bild nach dem Loslassen da ist). Gleiche Mitte, gleiche Lage: `0 0 w h`.
+ */
+export function viewportViewBox(
+  rect: RectMm,
+  center: { x: number; y: number },
+  rendered: RectMm,
+  renderedCenter: { x: number; y: number },
+  scale: number,
+): [number, number, number, number] {
+  const k = 1000 / scale;
+  const shiftX = rect.xMm + rect.widthMm / 2 - (rendered.xMm + rendered.widthMm / 2) - (center.x - renderedCenter.x) * k;
+  const shiftY = rect.yMm + rect.heightMm / 2 - (rendered.yMm + rendered.heightMm / 2) + (center.y - renderedCenter.y) * k;
+  return [rect.xMm - rendered.xMm - shiftX, rect.yMm - rendered.yMm - shiftY, rect.widthMm, rect.heightMm];
+}

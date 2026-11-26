@@ -68,6 +68,8 @@ import {
   handleCursor,
   normalizeRect,
   pickViewport,
+  resizedCenter,
+  viewportViewBox,
   vpRect,
   type Handle,
   type RectMm,
@@ -90,15 +92,30 @@ export function ViewportPlanSvg({
   project,
   viewport,
   rect,
+  contentFixed = false,
 }: {
   project: Project;
   viewport: LayoutViewport;
   rect: RectMm;
+  /** [333] Rahmen wird gerade in der Grösse geändert: Inhalt bleibt auf dem Papier liegen (Vorschau wie InDesign). */
+  contentFixed?: boolean;
 }) {
   const ref = useRef<SVGGElement>(null);
   // Aktuelle Lage für das asynchron eintreffende SVG (Schnitt) — sonst sässe es bis zum nächsten Render falsch.
+  const place = (): void => {
+    const el = ref.current;
+    const r = renderedViewports.get(viewport.id);
+    if (!el) return;
+    if (!r) return placeInner(el, rectRef.current);
+    // Bildmitte jetzt: eigene (`center`), sonst die beim Erzeugen; beim Grössen-Ziehen mitwandernd (Inhalt fest).
+    const own = viewport.center && Number.isFinite(viewport.center.x) && Number.isFinite(viewport.center.y) ? viewport.center : r.center;
+    const c = contentFixedRef.current ? resizedCenter(own, vpRect(viewport), rectRef.current, r.scale) : own;
+    placeInner(el, rectRef.current, viewportViewBox(rectRef.current, c, r.rect, r.center, r.scale));
+  };
   const rectRef = useRef(rect);
   rectRef.current = rect;
+  const contentFixedRef = useRef(contentFixed);
+  contentFixedRef.current = contentFixed;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -124,7 +141,14 @@ export function ViewportPlanSvg({
           bounds: viewportCenterBounds(viewport, scaleN),
         });
         el.replaceChildren(print.svg);
-        placeInner(el, rectRef.current);
+        // [333] Wofür das Bild erzeugt wurde (Rahmen, Bildmitte, Massstab): Grundlage der `viewBox` beim Ziehen.
+        const b = viewportCenterBounds(viewport, scaleN) ?? plan.bounds;
+        renderedViewports.set(viewport.id, {
+          rect: vpRect(viewport),
+          center: { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 },
+          scale: scaleN,
+        });
+        place();
       })
       .catch(() => {
         if (!disposed) el.replaceChildren();
@@ -135,19 +159,26 @@ export function ViewportPlanSvg({
   }, [project, viewport.snapshotId, viewport.widthMm, viewport.heightMm, viewport.scaleDenominator, viewport.center?.x, viewport.center?.y, viewport.designOptions, viewport.designOptionCombination]);
   // Lage/Grösse über die Attribute des inneren SVG (folgt auch dem Ghost beim Ziehen).
   useEffect(() => {
-    if (ref.current) placeInner(ref.current, rect);
+    place();
   });
   return <g ref={ref} pointerEvents="none" />;
 }
 
-/** Lage/Grösse des inneren Viewport-SVG in Blatt-mm setzen. */
-function placeInner(el: SVGGElement, rect: RectMm): void {
+/**
+ * [333] Je Viewport das zuletzt erzeugte Bild: Rahmen, Bildmitte (Modell-Meter, auch ohne eigene `center` — dann die
+ * Mitte des Planausmasses) und Massstab. Für die `viewBox` beim Ziehen und für die mitwandernde Bildmitte beim Loslassen.
+ */
+const renderedViewports = new Map<string, { rect: RectMm; center: { x: number; y: number }; scale: number }>();
+
+/** Lage/Grösse des inneren Viewport-SVG in Blatt-mm setzen; `viewBox` beschneidet/erweitert statt zu strecken ([333]). */
+function placeInner(el: SVGGElement, rect: RectMm, viewBox?: [number, number, number, number]): void {
   const svg = el.firstElementChild;
   if (!svg) return;
   svg.setAttribute("x", String(rect.xMm));
   svg.setAttribute("y", String(rect.yMm));
   svg.setAttribute("width", String(rect.widthMm));
   svg.setAttribute("height", String(rect.heightMm));
+  if (viewBox && viewBox.every(Number.isFinite)) svg.setAttribute("viewBox", viewBox.join(" "));
   svg.setAttribute("preserveAspectRatio", "none");
 }
 
@@ -554,12 +585,19 @@ export function LayoutSheetPane({
       const s = drag.start;
       if (last.xMm === s.xMm && last.yMm === s.yMm && last.widthMm === s.widthMm && last.heightMm === s.heightMm) return;
       const r = clampRectToSheet(last, sheet.w, sheet.h);
-      handlers.onPatchViewport(drag.id, {
+      const next = {
         xMm: round1(r.xMm),
         yMm: round1(r.yMm),
         widthMm: round1(Math.max(MIN_VP_MM, r.widthMm)),
         heightMm: round1(Math.max(MIN_VP_MM, r.heightMm)),
-      });
+      };
+      // [333] Grösse ändern wie InDesign: der Inhalt bleibt auf dem Papier liegen, die Bildmitte wandert mit (ohne eigene
+      // Mitte ab der des gezeigten Bildes). Verschieben nimmt den Inhalt mit (Mitte bleibt).
+      const vp = layout.viewports.find((v) => v.id === drag.id);
+      const shown = renderedViewports.get(drag.id);
+      const own = vp?.center && Number.isFinite(vp.center.x) && Number.isFinite(vp.center.y) ? vp.center : shown?.center;
+      const center = drag.handle !== "body" && own && shown ? resizedCenter(own, s, next, shown.scale) : undefined;
+      handlers.onPatchViewport(drag.id, center ? { ...next, center } : next);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -751,7 +789,12 @@ export function LayoutSheetPane({
           return (
             <g key={vp.id} data-viewport-id={vp.id}>
               {snap ? (
-                <ViewportPlanSvg project={project} viewport={vp} rect={r} />
+                <ViewportPlanSvg
+                  project={project}
+                  viewport={vp}
+                  rect={r}
+                  contentFixed={!!preview && preview.drag.mode === "edit" && preview.drag.id === vp.id && preview.drag.handle !== "body"}
+                />
               ) : (
                 <g pointerEvents="none">
                   <rect x={r.xMm} y={r.yMm} width={r.widthMm} height={r.heightMm} fill="#fff6f6" />

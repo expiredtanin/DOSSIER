@@ -303,3 +303,43 @@ test("Blatt: Fang auf Viewport-Inhalt", async ({ page }) => {
   expect([...kinds].some((k) => ["endpoint", "onEdge", "midpoint", "intersection", "perpendicular"].includes(k))).toBe(true);
   await page.screenshot({ path: "test-results/layout-sheet-viewport-snap.png" });
 });
+
+test("[333] Blatt: Viewport vergrössern lässt den Inhalt liegen (wie InDesign)", async ({ page }) => {
+  await startNewProject(page);
+  await openSample(page);
+  await openTab(page, "Ausschnitte");
+  await page.getByTitle("Ausschnitt speichern").first().click();
+  await page.getByPlaceholder("Ausschnitt speichern als:").fill("EG");
+  await page.keyboard.press("Enter");
+  await openNewLayout(page);
+  const paper = await paperBox(page);
+  await page.getByRole("button", { name: /Viewport aufziehen/ }).click();
+  const a = { x: paper.x + paper.width * 0.1, y: paper.y + paper.height * 0.1 };
+  const b = { x: paper.x + paper.width * 0.7, y: paper.y + paper.height * 0.4 };
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps: 6 });
+  await page.mouse.up();
+  const bind = page.locator(".layout-sheet-bind select");
+  if (await bind.isVisible().catch(() => false)) await bind.selectOption({ label: "EG" });
+  await expect(page.locator("[data-viewport-id] svg").first()).toBeAttached();
+  await page.keyboard.press("Escape");
+  await page.waitForTimeout(800);
+  // Lage einer Raumbeschriftung im Viewport vorher und nachher (Bildschirm-Pixel).
+  const label = page.locator("[data-viewport-id] text", { hasText: "Wohnen" }).first();
+  const before = (await label.boundingBox())!;
+  await page.mouse.click((a.x + b.x) / 2, (a.y + b.y) / 2);
+  const bottom = { x: (a.x + b.x) / 2, y: b.y };
+  await page.mouse.move(bottom.x, bottom.y);
+  await page.mouse.down();
+  await page.mouse.move(bottom.x, bottom.y + 120, { steps: 6 });
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+  await page.mouse.click(paper.x + paper.width * 0.95, paper.y + paper.height * 0.95);
+  await page.waitForTimeout(1200);
+  const frame = (await page.locator("[data-viewport-id]").first().boundingBox())!;
+  expect(frame.height, "Rahmen höher").toBeGreaterThan(b.y - a.y + 80);
+  const after = (await label.boundingBox())!;
+  expect(Math.abs(after.x - before.x), "Inhalt bleibt waagrecht").toBeLessThan(1.5);
+  expect(Math.abs(after.y - before.y), "Inhalt bleibt liegen (nicht neu zentriert)").toBeLessThan(1.5);
+});

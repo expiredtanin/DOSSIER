@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutViewport } from "../model/types";
 import {
+  resizedCenter,
+  viewportViewBox,
   applyHandleDrag,
   clampRectToSheet,
   handleAt,
@@ -129,5 +131,27 @@ describe("vpRect", () => {
       widthMm: 7,
       heightMm: 8,
     });
+  });
+});
+
+describe("[333] Inhalt bleibt beim Vergrössern liegen (resizedCenter, viewportViewBox)", () => {
+  const start = { xMm: 10, yMm: 20, widthMm: 100, heightMm: 60 };
+  it("Unterkante 40 mm nach unten: Mitte 20 mm tiefer, bei 1:100 also 2 m Richtung −y", () => {
+    const next = { ...start, heightMm: 100 };
+    expect(resizedCenter({ x: 5, y: 7 }, start, next, 100)).toEqual({ x: 5, y: 5 });
+  });
+  it("linke Kante nach links: Mitte nach links", () => {
+    const c = resizedCenter({ x: 0, y: 0 }, start, { ...start, xMm: 0, widthMm: 110 }, 50);
+    expect(c.x).toBeCloseTo(-0.25);
+    expect(c.y).toBeCloseTo(0);
+  });
+  it("viewBox: gleicher Rahmen = 0 0 w h; Vergrössern mit mitwandernder Mitte = Inhalt fest; Verschieben = Inhalt wandert mit", () => {
+    const c0 = { x: 3, y: 4 };
+    expect(viewportViewBox(start, c0, start, c0, 100)).toEqual([0, 0, 100, 60]);
+    const bigger = { ...start, yMm: 10, heightMm: 100 };
+    const vb = viewportViewBox(bigger, resizedCenter(c0, start, bigger, 100), start, c0, 100);
+    vb.forEach((v, i) => expect(v).toBeCloseTo([0, -10, 100, 100][i]));
+    const moved = { ...start, xMm: 50 };
+    viewportViewBox(moved, c0, start, c0, 100).forEach((v, i) => expect(v).toBeCloseTo([0, 0, 100, 60][i]));
   });
 });
