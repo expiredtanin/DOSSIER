@@ -341,6 +341,7 @@ export const Content = memo(function Content({
         renderMode={renderMode}
         detail={detail}
         view3d={view3d}
+        cameraKey={level.id}
         groundElevation={(level.baseElevation ?? 0) + explodeLift}
         gridVisible={grid3dVisible}
         onToggleGrid={onToggleGrid3d}

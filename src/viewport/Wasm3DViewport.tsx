@@ -391,6 +391,9 @@ function fitTargetDist(project: Project, hide?: Hide3d): {
 }
 
 
+/** [333] Aufbewahrte Blicke je 3D-Ansicht (`cameraKey`), über das Schliessen hinweg (höchstens wenige Geschosse). */
+const savedViews = new Map<string, { orbit: OrbitState; orbitMode: boolean; preset: string | null }>();
+
 export function Wasm3DViewport({
   project,
   view3d = "perspective",
@@ -413,6 +416,7 @@ export function Wasm3DViewport({
   onEditEnd,
   onEditGroup,
   section3d = null,
+  cameraKey,
   onClearSection3d,
   commandActive = false,
   draft = null,
@@ -506,6 +510,11 @@ export function Wasm3DViewport({
    *  (App-State, `sectionPlaneFromLevel`), oder `null` = kein Live-Schnitt.
    *  Ersetzt den früheren lokalen Hardcode-Toggle. */
   section3d?: { point: [number, number, number]; normal: [number, number, number] } | null;
+  /**
+   * [333] Kennung der 3D-Ansicht (Geschoss): beim Schliessen (Tab-Wechsel) wird der frei gewählte Blick (Orbit) unter
+   * ihr aufbewahrt und beim Wiederöffnen fortgesetzt, statt aufs Preset zurückzuspringen.
+   */
+  cameraKey?: string;
   /** Klick auf den Viewport-Schnitt-Knopf: hebt die Bindung auf (App löscht die Id). */
   onClearSection3d?: () => void;
   /** Läuft gerade ein Zeichenbefehl (Command-Engine)? Bei `true`: LINKS setzt
@@ -705,13 +714,21 @@ export function Wasm3DViewport({
   // Orbit-Zustand in einem Ref (kein React-State): Mausbewegungen zeichnen
   // direkt neu, ohne die Komponente je Frame zu re-rendern. Dient NUR der
   // freien Navigation NACH einem Praeset-Sprung (s. Datei-Kommentar).
-  const orbitRef = useRef<OrbitState | null>(null);
+  const savedView = cameraKey ? savedViews.get(cameraKey) : undefined;
+  const orbitRef = useRef<OrbitState | null>(savedView?.orbit ?? null);
   // Redraw-Strategie des zuletzt aktiven Kamera-Modus (Praeset ODER freier
   // Orbit) — Resize/Modell-Update ruft diese auf, ohne den Modus zu kennen.
   const redrawRef = useRef<() => void>(() => {});
   // [118] Zeichnet der Orbit (true) oder noch die Rust-Preset-Kamera? Und welches Preset gilt gerade? (Kamera über Neuaufbau, s. `cameraAfterReady`)
-  const orbitModeRef = useRef(false);
-  const appliedPresetRef = useRef<string | null>(null);
+  const orbitModeRef = useRef(savedView?.orbitMode ?? false);
+  const appliedPresetRef = useRef<string | null>(savedView?.preset ?? null);
+  // [333] Blick beim Schliessen aufbewahren (s. `cameraKey`).
+  useEffect(() => {
+    if (!cameraKey) return;
+    return () => {
+      if (orbitRef.current) savedViews.set(cameraKey, { orbit: { ...orbitRef.current }, orbitMode: orbitModeRef.current, preset: appliedPresetRef.current });
+    };
+  }, [cameraKey]);
   // Waren schon sichtbare Punktwolken eingepasst? (erste Wolke → Kamera einpassen)
   const hadCloudsRef = useRef(false);
   // Aktuelles Preset neu anwenden und den Orbit darauf einpassen (s. `applyPreset`).
@@ -786,7 +803,15 @@ export function Wasm3DViewport({
   useEffect(() => {
     if (!ready) return;
     const act = cameraAfterReady({ hasOrbit: orbitRef.current !== null, appliedPreset: appliedPresetRef.current, view3d, orbitMode: orbitModeRef.current });
-    if (act === "redraw") redrawRef.current();
+    if (act === "redraw") {
+      // Wiedergeöffnete Ansicht ([333]): der aufbewahrte Orbit zeichnet (nach einem Neuaufbau ist das schon so).
+      if (orbitModeRef.current) {
+        redrawRef.current = () => {
+          if (orbitRef.current) render(orbitCamera(orbitRef.current));
+        };
+      }
+      redrawRef.current();
+    }
     else applyPreset();
   }, [ready, applyPreset, view3d]);
   // [118] Ohne Renderer (verloren/aufgegeben) trotzdem einen Orbit anlegen, damit die Kamera-Brücke lesen und setzen kann.
