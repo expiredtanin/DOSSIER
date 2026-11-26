@@ -1413,7 +1413,35 @@ export function Wasm3DViewport({
     }
     drag.lastModel = constrainedModel;
   };
+  // [333] Griff-Bewegungen je Bild zusammenfassen: jede Bewegung löst Änderung + Neuberechnung des Modells aus. WebKit
+  // (Tauri/macOS) liefert `pointermove` dichter als ein Bild; ohne Zusammenfassen stauten sie sich (Wand höher ziehen
+  // hinkte sekundenlang hinterher). Gerechnet wird nur die letzte Lage; beim Setzen zuerst die ausstehende.
+  const pendingGripMoveRef = useRef<{ x: number; y: number; shift: boolean; raf: number } | null>(null);
+  const flushGripMove = () => {
+    const m = pendingGripMoveRef.current;
+    if (!m) return;
+    pendingGripMoveRef.current = null;
+    cancelAnimationFrame(m.raf);
+    if (gripDragRef.current) onGripPointerMove(m.x, m.y, m.shift);
+  };
+  /** Abbruch (Esc): ausstehende Bewegung verwerfen, nicht nach dem Rückgängig noch anwenden. */
+  const dropGripMove = () => {
+    const m = pendingGripMoveRef.current;
+    if (m) cancelAnimationFrame(m.raf);
+    pendingGripMoveRef.current = null;
+  };
+  const queueGripMove = (x: number, y: number, shift: boolean) => {
+    const m = pendingGripMoveRef.current;
+    if (m) {
+      m.x = x;
+      m.y = y;
+      m.shift = shift;
+      return;
+    }
+    pendingGripMoveRef.current = { x, y, shift, raf: requestAnimationFrame(() => flushGripMove()) };
+  };
   const endGripDrag = () => {
+    flushGripMove();
     if (!gripDragRef.current) return;
     gripDragRef.current = null;
     axisLockRef.current = null;
@@ -1431,10 +1459,15 @@ export function Wasm3DViewport({
   useEffect(() => {
     const onWindowPointerMove = (e: PointerEvent) => {
       if (!gripDragRef.current) return;
-      onGripPointerMove(e.clientX, e.clientY, e.shiftKey);
+      queueGripMove(e.clientX, e.clientY, e.shiftKey);
     };
     window.addEventListener("pointermove", onWindowPointerMove);
-    return () => window.removeEventListener("pointermove", onWindowPointerMove);
+    return () => {
+      window.removeEventListener("pointermove", onWindowPointerMove);
+      const m = pendingGripMoveRef.current;
+      if (m) cancelAnimationFrame(m.raf);
+      pendingGripMoveRef.current = null;
+    };
   }, []);
 
   // Tab während eines laufenden Endpunkt-/Verschiebe-Griff-Drags: Feld-
@@ -1453,6 +1486,7 @@ export function Wasm3DViewport({
       if (e.key === "Escape") {
         if (!gripDragRef.current) return;
         e.preventDefault();
+        dropGripMove();
         onGrip3dEditCancelRef.current?.();
         endGripDrag();
         return;

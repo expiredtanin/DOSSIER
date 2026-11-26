@@ -29,6 +29,8 @@ declare global {
       coreReady: () => Promise<void>;
       coreEpoch: () => number;
       /** Zahl der Elemente je Liste des Projekts (Wände, Öffnungen, Zeichnungsebenen) und das Projekt im Kern als JSON-Länge. */
+      /** [333] Wand-Oberkante setzen wie der 3D-Höhengriff (Messung der Griff-Latenz); `null` ohne Wand. */
+      setWallTop: (index: number, z: number) => string | null;
       counts: () => { walls: number; openings: number; drawingLevels: number; coreJson: number; /** [280] Träger. */ beams: number };
       /** Endpunkte aller 2D-Linien des Projekts ([123] Transformations-Test). */
       lines: () => { a: { x: number; y: number }; b: { x: number; y: number } }[];
@@ -202,6 +204,12 @@ export function installTestHooks(): void {
     },
     coreReady,
     coreEpoch,
+    setWallTop: (index, z) => {
+      const w = getState().project.walls[index];
+      if (!w) return null;
+      getState().updateWall(w.id, { top: { mode: "custom", z } }, `onEdit3dWallTop:${w.id}`);
+      return w.id;
+    },
     counts: () => {
       const p = getState().project;
       return { walls: p.walls.length, openings: p.openings?.length ?? 0, drawingLevels: p.drawingLevels.length, beams: p.beams?.length ?? 0, coreJson: storeDocument(p).json().length };
