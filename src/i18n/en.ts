@@ -3849,6 +3849,7 @@ export const en: Record<TranslationKey, string> = {
   // Editor
   "layouts.editorTitle": "Layout editor",
   "layouts.fit": "Fit",
+  "layouts.strip": "Sheets",
   "layouts.moveContent": "Move content within the frame",
   "layouts.insert": "Insert",
   "layouts.viewportShort": "View",

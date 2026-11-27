@@ -4,7 +4,7 @@
 // Griffen und einem Undo-Schritt je Element. Bildschirm-Punkte aus der viewBox-Abbildung des
 // SVG-Overlays (x·90, −y·90 minus lokalem Ursprung, s. `planView/overlayOrigin.ts`).
 import type { Page } from "@playwright/test";
-import { blurFocus, expect, openSample, openTab, startNewProject, test, typeCommand } from "./app";
+import { blurFocus, discardIfAsked, expect, fileMenu, openSample, openTab, startNewProject, test, typeCommand } from "./app";
 
 type Pt = { x: number; y: number };
 
@@ -386,4 +386,24 @@ test("[333] Blatt: Inhalts-Griff verschiebt den Plan im Rahmen, der Rahmen bleib
   expect(after.y - before.y, "Inhalt nach unten").toBeGreaterThan(30);
   const frame1 = (await page.locator("[data-viewport-id]").first().boundingBox())!;
   expect(Math.abs(frame1.x - frame0.x) + Math.abs(frame1.width - frame0.width), "Rahmen unverändert").toBeLessThan(2);
+});
+
+test("[333] Blätter-Leiste: Vorschau aller Blätter, Klick öffnet ein anderes Blatt", async ({ page }) => {
+  await startNewProject(page);
+  await fileMenu(page, /^Neu aus Vorlage: Wettbewerb$/);
+  await discardIfAsked(page);
+  await page.getByRole("tab", { name: "Mappe", exact: true }).click();
+  await page.getByText("Präsentationsplan", { exact: true }).first().click();
+  const strip = page.locator("[data-sheet-strip]");
+  await expect(strip).toBeVisible();
+  await expect(strip.locator(".sheet-strip-item")).toHaveCount(3);
+  await expect(strip.locator(".sheet-strip-item.active")).toContainText("Präsentationsplan");
+  await strip.locator(".sheet-strip-item", { hasText: "Situation" }).click();
+  await expect(page.locator(".layout-sheet-name")).toHaveText("Situation 1:500");
+  await expect(strip.locator(".sheet-strip-item.active")).toContainText("Situation");
+  // Ausblenden bleibt (Knopf in der Leiste).
+  await page.locator("[data-sheet-strip-toggle]").click();
+  await expect(strip).toHaveCount(0);
+  await page.locator("[data-sheet-strip-toggle]").click();
+  await expect(page.locator("[data-sheet-strip]")).toBeVisible();
 });

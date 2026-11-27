@@ -91,6 +91,8 @@ export function useSheetPane(opts: {
   const openId = () => activeLayout?.id ?? "";
   const handlers = useEventBundle({
     onBack: () => setActiveLayoutId(null),
+    // [333] Blätter-Leiste: anderes Blatt öffnen.
+    onOpenLayout: (id: string) => setActiveLayoutId(id),
     // [208] Freier Text: Textspalte-Befehl auf der Blatt-Ebene (Rahmen aufziehen, dann tippen).
     onAddText: () => runCommand?.("textbox"),
     onPatchViewport: (viewportId: string, patch: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>

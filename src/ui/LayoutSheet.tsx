@@ -30,6 +30,7 @@ import type {
 import { createTable, PX_PER_M, sheetTables, storedChoice, TABLE_SOURCES, tableSourceLabel, viewportCombinationPatch, viewportSnapshotPlan } from "../core";
 import type { TableOut } from "../core";
 import { SheetTableHud } from "./SheetTableHud";
+import { SheetStrip } from "./SheetStrip";
 import { isInModalDialog } from "../state/modalScope";
 import { SheetImageHud } from "./SheetImageHud";
 import { SheetGuidesHud } from "./SheetGuidesHud";
@@ -287,6 +288,8 @@ function clip(s: string, max: number): string {
 export interface LayoutSheetHandlers {
   /** Zurück zur Modell-Ansicht (Grundriss/3D). */
   onBack: () => void;
+  /** [333] Anderes Blatt der Mappe öffnen (Blätter-Leiste). */
+  onOpenLayout?: (layoutId: string) => void;
   /** Freier Text ([208]): startet die Textspalte (Rahmen aufziehen, Text tippen) auf der Blatt-Ebene. */
   onAddText?: () => void;
   /** Ändert Position/Grösse/Massstab eines Viewports (mm). */
@@ -557,6 +560,24 @@ export function LayoutSheetPane({
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);
   };
+
+  // [333] Blätter-Leiste (Vorschau aller Blätter), Zustand je Rechner gemerkt.
+  const [stripOpen, setStripOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("dossier.sheetStrip") !== "0";
+    } catch {
+      return true;
+    }
+  });
+  const toggleStrip = () =>
+    setStripOpen((v) => {
+      try {
+        localStorage.setItem("dossier.sheetStrip", v ? "0" : "1");
+      } catch {
+        /* nur Komfort */
+      }
+      return !v;
+    });
 
   // [333] Inhalts-Griff (wie InDesign): Inhalt im Rahmen verschieben, der Rahmen bleibt. Beim Loslassen wandert die Bildmitte.
   const [contentPan, setContentPan] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -1186,6 +1207,18 @@ export function LayoutSheetPane({
           <span className="material-symbols-outlined" aria-hidden="true">chevron_left</span>
           <span className="tb-label">{t("layouts.backToModel")}</span>
         </button>
+        {handlers.onOpenLayout && (
+          <button
+            className={`nav-add${stripOpen ? " active" : ""}`}
+            onClick={toggleStrip}
+            title={t("layouts.strip")}
+            aria-label={t("layouts.strip")}
+            aria-pressed={stripOpen}
+            data-sheet-strip-toggle
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">view_sidebar</span>
+          </button>
+        )}
         <span className="layout-sheet-name" title={layout.name}>{layout.name}</span>
         <span className="layout-sheet-sep" aria-hidden="true" />
         <span className="layout-sheet-group" role="group" aria-label={t("layouts.insert")}>
@@ -1284,6 +1317,8 @@ export function LayoutSheetPane({
         </button>
       </div>
 
+      <div className={`layout-sheet-body${stripOpen && handlers.onOpenLayout ? " with-strip" : ""}`}>
+      {stripOpen && handlers.onOpenLayout && <SheetStrip project={project} activeId={layout.id} onOpen={handlers.onOpenLayout} />}
       <div className="layout-sheet-stage">
         {children({ backdrop, fitBounds, onPlanSelect: onSheetSelect })}
 
@@ -1519,6 +1554,7 @@ export function LayoutSheetPane({
             {snapshots.length === 0 ? t("layouts.noSnapshots") : t("layouts.placeHint")}
           </div>
         )}
+      </div>
       </div>
     </section>
   );

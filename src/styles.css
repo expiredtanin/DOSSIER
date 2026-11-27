@@ -8167,6 +8167,75 @@ body {
   flex: 0 1 auto;
 }
 
+/* [333] Blätter-Leiste links neben dem Blatt (wie die Seitenpalette in InDesign). */
+.layout-sheet-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+.sheet-strip {
+  flex: 0 0 124px;
+  overflow-y: auto;
+  padding: 10px 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-right: 1px solid var(--line, #2b2b2b);
+  background: var(--panel, #1d1d1d);
+}
+.sheet-strip-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 4px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+.sheet-strip-item:hover {
+  background: color-mix(in srgb, var(--ink, #ddd) 6%, transparent);
+}
+.sheet-strip-item.active {
+  border-color: var(--accent, #3b82f6);
+  background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent);
+}
+.sheet-strip-item svg {
+  display: block;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+.sheet-strip-vp {
+  fill: #e6e6e3;
+  stroke: #9a9a96;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.sheet-strip-tb {
+  fill: #f1f1ee;
+  stroke: #b5b5b0;
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.sheet-strip-label {
+  display: flex;
+  gap: 4px;
+  max-width: 104px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+.sheet-strip-no {
+  font-weight: 600;
+  flex: 0 0 auto;
+}
+.sheet-strip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .layout-sheet-stage {
   position: relative;
   flex: 1;
