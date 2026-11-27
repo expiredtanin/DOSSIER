@@ -407,3 +407,46 @@ test("[333] Blätter-Leiste: Vorschau aller Blätter, Klick öffnet ein anderes 
   await page.locator("[data-sheet-strip-toggle]").click();
   await expect(page.locator("[data-sheet-strip]")).toBeVisible();
 });
+
+test("[333] Blätter-Leiste: Ziehen ordnet um (ein Undo-Schritt), Duplizieren, Löschen mit Rückfrage", async ({ page }) => {
+  await startNewProject(page);
+  await fileMenu(page, /^Neu aus Vorlage: Wettbewerb$/);
+  await discardIfAsked(page);
+  await page.getByRole("tab", { name: "Mappe", exact: true }).click();
+  await page.getByText("Präsentationsplan", { exact: true }).first().click();
+  const strip = page.locator("[data-sheet-strip]");
+  const items = strip.locator(".sheet-strip-item");
+  const names = () => strip.locator(".sheet-strip-name").allTextContents();
+  await expect(items).toHaveCount(3);
+  const before = await names();
+  // Dritte Vorschau über die erste ziehen (Zeigerereignisse, Einfügelinie sichtbar).
+  const first = (await items.nth(0).boundingBox())!;
+  const third = (await items.nth(2).boundingBox())!;
+  await page.mouse.move(third.x + third.width / 2, third.y + third.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2, { steps: 8 });
+  await page.mouse.move(first.x + first.width / 2, first.y + 4, { steps: 3 });
+  await expect(strip.locator(".sheet-strip-item.drop-before")).toHaveCount(1);
+  await page.mouse.up();
+  await expect.poll(names).toEqual([before[2], before[0], before[1]]);
+  // Das Ziehen öffnet kein anderes Blatt.
+  await expect(strip.locator(".sheet-strip-item.active")).toContainText("Präsentationsplan");
+  // Ein Undo-Schritt stellt die alte Reihenfolge wieder her.
+  await blurFocus(page);
+  await page.keyboard.press("ControlOrMeta+z");
+  await expect.poll(names).toEqual(before);
+  // Duplizieren über das Kontextmenü.
+  await items.nth(1).click({ button: "right" });
+  await page.getByText("Duplizieren", { exact: true }).click();
+  await expect(items).toHaveCount(4);
+  // Löschen verlangt eine Rückfrage; Abbrechen lässt alles.
+  await items.nth(2).click({ button: "right" });
+  await page.getByText("Löschen", { exact: true }).click();
+  await expect(page.getByTestId("confirm-dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(items).toHaveCount(4);
+  await items.nth(2).click({ button: "right" });
+  await page.getByText("Löschen", { exact: true }).click();
+  await page.getByTestId("confirm-dialog-ok").click();
+  await expect(items).toHaveCount(3);
+});

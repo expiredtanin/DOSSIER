@@ -6,6 +6,7 @@ import { t } from "../../i18n";
 import { createLayout, createLayoutFolder, createMasterLayout, deleteFolder as deleteLayoutFolder, deleteMasterFolder, moveLayoutToFolder, moveFolderToFolder, createSheetLevel } from "../../model/layoutModel";
 import { folderPdfBytes } from "../../export/layoutPdf";
 import { addPublishSetOps, addWbwSetOps, deletePublishSetOps, patchPublishSetOps, publishSet, setCompetitionOps } from "../publishActions";
+import { deleteSheetOps } from "../sheetOrder";
 import { openLayoutTab } from "../tabNavigation";
 import { saveBinaryFile } from "../../native/saveFile";
 import { runWithAnonymityGate } from "../anonymityGate";
@@ -31,15 +32,7 @@ export function buildLayoutsHost(c: FlatHostOpts) {
     },
     onDeleteLayout: (id) => {
       // Mit dem Layout gehen seine Blatt-Ebene und deren Zeichnungen (ein Undo-Schritt).
-      applyChange((p) => {
-        const levels = p.drawingLevels.filter((l) => l.layoutId === id).map((l) => l.id);
-        const drawings = p.drawings2d.filter((d) => levels.includes(d.levelId)).map((d) => d.id);
-        return [
-          ...removeItems(p, "drawings2d", drawings),
-          ...removeItems(p, "drawingLevels", levels),
-          ...removeItems(p, "layouts", [id]),
-        ];
-      });
+      applyChange((p) => deleteSheetOps(p, id));
       setActiveLayoutId((cur) => (cur === id ? null : cur));
     },
     onOpenLayout: (id) => {

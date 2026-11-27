@@ -25,6 +25,8 @@ import { addImage, patchImage, removeImage } from "../model/layoutImages";
 import { addLegend, patchLegend, removeLegend } from "../analysis/legend";
 import { useEventBundle } from "./useEvent";
 import { setSheetGuidesOps } from "./sheetGuides";
+import { deleteSheetOps, duplicateSheetOps, reorderSheetsOps } from "./sheetOrder";
+import { t } from "../i18n";
 
 export function useSheetPane(opts: {
   activeLayoutId: string | null;
@@ -93,6 +95,21 @@ export function useSheetPane(opts: {
     onBack: () => setActiveLayoutId(null),
     // [333] Blätter-Leiste: anderes Blatt öffnen.
     onOpenLayout: (id: string) => setActiveLayoutId(id),
+    // [333] Blatt an die Einfüge-Stelle `slot` ziehen (ein Undo-Schritt).
+    onMoveLayout: (id: string, slot: number) => applyChange((p) => reorderSheetsOps(p, id, slot)),
+    // [333] Blatt direkt hinter dem Original kopieren (Blatt-Ebene und Zeichnungen mit).
+    onDuplicateLayout: (id: string) => {
+      const name = (layouts ?? []).find((l) => l.id === id)?.name ?? "";
+      applyChange((p) => duplicateSheetOps(p, id, `lay-${Date.now()}`, t("layouts.copyName", { name })));
+    },
+    // [333] Blatt löschen; ist es das offene, öffnet das Nachbarblatt (sonst zurück zur Modell-Ansicht).
+    onDeleteLayout: (id: string) => {
+      const list = layouts ?? [];
+      const i = list.findIndex((l) => l.id === id);
+      const next = list[i + 1] ?? list[i - 1];
+      applyChange((p) => deleteSheetOps(p, id));
+      if (activeLayoutId === id) setActiveLayoutId(next?.id ?? null);
+    },
     // [208] Freier Text: Textspalte-Befehl auf der Blatt-Ebene (Rahmen aufziehen, dann tippen).
     onAddText: () => runCommand?.("textbox"),
     onPatchViewport: (viewportId: string, patch: Partial<Omit<LayoutViewport, "id" | "snapshotId">>) =>

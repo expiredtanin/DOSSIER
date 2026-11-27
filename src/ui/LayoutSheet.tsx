@@ -290,6 +290,12 @@ export interface LayoutSheetHandlers {
   onBack: () => void;
   /** [333] Anderes Blatt der Mappe öffnen (Blätter-Leiste). */
   onOpenLayout?: (layoutId: string) => void;
+  /** [333] Blatt per Ziehen umsortieren: an die Einfüge-Stelle `slot` (0…n, gezählt in der alten Liste). */
+  onMoveLayout?: (layoutId: string, slot: number) => void;
+  /** [333] Blatt duplizieren. */
+  onDuplicateLayout?: (layoutId: string) => void;
+  /** [333] Blatt löschen (die Rückfrage stellt die Leiste). */
+  onDeleteLayout?: (layoutId: string) => void;
   /** Freier Text ([208]): startet die Textspalte (Rahmen aufziehen, Text tippen) auf der Blatt-Ebene. */
   onAddText?: () => void;
   /** Ändert Position/Grösse/Massstab eines Viewports (mm). */
@@ -1318,7 +1324,7 @@ export function LayoutSheetPane({
       </div>
 
       <div className={`layout-sheet-body${stripOpen && handlers.onOpenLayout ? " with-strip" : ""}`}>
-      {stripOpen && handlers.onOpenLayout && <SheetStrip project={project} activeId={layout.id} onOpen={handlers.onOpenLayout} />}
+      {stripOpen && handlers.onOpenLayout && <SheetStrip project={project} activeId={layout.id} onOpen={handlers.onOpenLayout} onMove={handlers.onMoveLayout} onDuplicate={handlers.onDuplicateLayout} onDelete={handlers.onDeleteLayout} />}
       <div className="layout-sheet-stage">
         {children({ backdrop, fitBounds, onPlanSelect: onSheetSelect })}
 

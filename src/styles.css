@@ -8196,6 +8196,50 @@ body {
   color: var(--ink);
   cursor: pointer;
 }
+.sheet-strip-item {
+  position: relative;
+  touch-action: none;
+  user-select: none;
+}
+.sheet-strip-item.dragging {
+  opacity: 0.45;
+}
+/* Einfügelinie beim Ziehen (zwischen den Blättern). */
+.sheet-strip-item.drop-before::before,
+.sheet-strip-item.drop-after::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--accent, #3b82f6);
+  pointer-events: none;
+}
+.sheet-strip-item.drop-before::before {
+  top: -8px;
+}
+.sheet-strip-item.drop-after::after {
+  bottom: -8px;
+}
+.sheet-strip-more {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  padding: 0 4px;
+  line-height: 14px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  opacity: 0;
+}
+.sheet-strip-item:hover .sheet-strip-more,
+.sheet-strip-item:focus-within .sheet-strip-more {
+  opacity: 1;
+  background: color-mix(in srgb, var(--panel, #1d1d1d) 80%, transparent);
+}
 .sheet-strip-item:hover {
   background: color-mix(in srgb, var(--ink, #ddd) 6%, transparent);
 }
