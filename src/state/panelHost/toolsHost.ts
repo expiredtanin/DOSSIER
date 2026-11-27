@@ -18,6 +18,7 @@ export function buildToolsHost(c: FlatHostOpts) {
     // Geschoss-Arbeitsebene (OKFF) projiziert und über onWorkplanePoint in
     // dieselbe Engine wie im Grundriss gespeist (Viewport3D).
     toolsEnabled: activeLevel.kind === "floor",
+    sheetActive: !!activeLevel.layoutId,
     activeCommand: engineView.commandName,
     onRunCommand,
     activeWallTypeId,

@@ -85,6 +85,8 @@ export interface PanelHostValue {
   onSelectTool: (id: ToolId) => void;
   /** Werkzeuge nur im Grundriss eines Geschosses sinnvoll. */
   toolsEnabled: boolean;
+  /** [333] Ein Layout-Blatt ist offen: die Palette zeigt nur, was auf dem Blatt Sinn ergibt (keine Bauteile). */
+  sheetActive: boolean;
   /** Laufender Engine-Befehl (Highlight der Befehls-Knöpfe im ToolsPanel). */
   activeCommand: string | null;
   /** Engine-Befehl starten (Ändern-/BIM-Befehle im ToolsPanel — gleicher Pfad

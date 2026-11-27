@@ -34,6 +34,7 @@ import { SiteRulesSection } from "./SiteRulesSection";
 import { TreeSection } from "./objectInfo/TreeSection";
 import { RailingSection } from "./objectInfo/RailingSection";
 import { CameraSection } from "./objectInfo/CameraSection";
+import { SheetSection } from "./objectInfo/SheetSection";
 import { ViewShadowsInfo, MeasurementSection } from "./objectInfo/InfoBlocks";
 import { DimensionField, RotateField } from "./objectInfo/fields";
 import { LibObjectSection } from "./objectInfo/LibObjectSection";
@@ -123,6 +124,9 @@ export function ObjectInfoPanel({ showPlacement = true }: { showPlacement?: bool
       </div>
     );
   }
+  // [333] Offenes Layout-Blatt ohne Auswahl: die Eigenschaften des Blatts (wie InDesign das Dokument).
+  const sheetLayoutId = sel === null && !m ? storeProject.drawingLevels.find((l) => l.id === host.activeLevelId)?.layoutId : undefined;
+  if (sheetLayoutId) return <SheetSection layoutId={sheetLayoutId} />;
   if (sel === null) {
     const groups = hasInfoGroups(null, undefined, host);
     return (

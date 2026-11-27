@@ -108,8 +108,10 @@ test("Layout-Werkzeugleiste: Tabellen-Auswahl lesbar, „Einpassen“ im Fenster
   await page.getByText("Präsentationsplan", { exact: true }).first().click();
   const bar = page.locator(".layout-sheet-toolbar");
   await expect(bar).toBeVisible();
+  // [333] Eine Zeile ohne Umbruch; schmal nur Symbole: die Tabellen-Auswahl bleibt ein ganzer Knopf.
   const select = bar.locator("select[data-table-add]");
-  expect((await select.boundingBox())!.width, "Tabellen-Auswahl nicht auf den Pfeil geschrumpft").toBeGreaterThan(80);
+  expect((await select.boundingBox())!.width, "Tabellen-Auswahl als ganzer Knopf").toBeGreaterThan(28);
+  expect((await bar.boundingBox())!.height, "eine Zeile").toBeLessThan(44);
   const fit = bar.getByRole("button", { name: "Einpassen" });
   const box = (await fit.boundingBox())!;
   expect(box.x + box.width, "Einpassen liegt im Fenster").toBeLessThanOrEqual(1280);

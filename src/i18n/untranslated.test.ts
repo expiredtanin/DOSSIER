@@ -37,7 +37,8 @@ function scan(): Record<string, string[]> {
     for (const m of text.matchAll(JSX_TEXT)) {
       const s = m[1].trim();
       // Generics/Typ-Ausdrücke wie `Array<string>` und reine Platzhalter ausnehmen
-      if (/^[a-z]+(\.[a-z]+)*$/.test(s) && !s.includes(" ")) continue;
+      // … und Symbol-Namen (Material Symbols, z. B. `fit_screen`): keine UI-Texte.
+      if (/^[a-z]+([._][a-z]+)*$/.test(s) && !s.includes(" ")) continue;
       if (/=>|=|;|\(|\)/.test(s)) continue;
       if (!/[a-zäöüß]{3,}/i.test(s)) continue;
       hits.push(s);

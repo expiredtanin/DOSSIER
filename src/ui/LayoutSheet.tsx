@@ -1121,62 +1121,78 @@ export function LayoutSheetPane({
   return (
     <section className="pane layout-sheet-pane">
       <div className="layout-sheet-toolbar" data-sheet-ui>
+        {/* [333] Eine Zeile, gruppiert: Zurück · Blattname | Einfügen | Hilfslinien · Einpassen. Unter ~820 px nur Symbole
+            (Container-Abfrage in styles.css), die Namen stehen dann im Tooltip. */}
         <button className="nav-add" onClick={handlers.onBack} title={t("layouts.backToModel")}>
           <span className="material-symbols-outlined" aria-hidden="true">chevron_left</span>
-          {t("layouts.backToModel")}
+          <span className="tb-label">{t("layouts.backToModel")}</span>
         </button>
-        <span className="layout-sheet-name">{layout.name}</span>
-        <button
-          className={`nav-add${placing ? " active" : ""}`}
-          onClick={() => {
-            setPlacing((v) => !v);
-            setPendingRect(null);
-            setSelectedId(null);
-          }}
-          disabled={snapshots.length === 0 || toolInputActive}
-          title={snapshots.length === 0 ? t("layouts.noSnapshots") : t("layouts.placeViewport")}
-        >
-          ＋ {t("layouts.placeViewport")}
-        </button>
-        <button
-          className="nav-add"
-          data-add-legend
-          disabled={toolInputActive}
-          title={t("legend.add")}
-          onClick={() => {
-            const id = handlers.onAddLegend({ xMm: 10, yMm: 10 });
-            setSelectedId(null);
-            setSelectedLegendId(id);
-          }}
-        >
-          ＋ {t("legend.add")}
-        </button>
-        <select
-          className="res-select"
-          value=""
-          disabled={toolInputActive}
-          title={t("sheetTable.add")}
-          data-table-add
-          onChange={(e) => {
-            const source = e.target.value as LayoutTableSource;
-            if (!source) return;
-            const tb = createTable(`tb-${Date.now()}`, source, sheet.w, sheet.h, layoutTables);
-            handlers.onAddTable(tb);
-            setSelectedTableId(tb.id);
-            setSelectedId(null);
-          }}
-        >
-          <option value="">＋ {t("sheetTable.add")}</option>
-          {TABLE_SOURCES.map((src) => (
-            <option key={src} value={src}>{tableSourceLabel(src)}</option>
-          ))}
-        </select>
-        <button className="nav-add" data-add-image disabled={toolInputActive} title={t("sheetImage.add")} onClick={() => fileRef.current?.click()}>
-          ＋ {t("sheetImage.add")}
-        </button>
-        <button className="nav-add" data-add-text disabled={toolInputActive || !handlers.onAddText} title={t("sheetText.add.hint")} onClick={() => handlers.onAddText?.()}>
-          ＋ {t("sheetText.add")}
-        </button>
+        <span className="layout-sheet-name" title={layout.name}>{layout.name}</span>
+        <span className="layout-sheet-sep" aria-hidden="true" />
+        <span className="layout-sheet-group" role="group" aria-label={t("layouts.insert")}>
+          <span className="layout-sheet-group-label tb-label">{t("layouts.insert")}</span>
+          <button
+            className={`nav-add${placing ? " active" : ""}`}
+            onClick={() => {
+              setPlacing((v) => !v);
+              setPendingRect(null);
+              setSelectedId(null);
+            }}
+            disabled={snapshots.length === 0 || toolInputActive}
+            title={snapshots.length === 0 ? t("layouts.noSnapshots") : t("layouts.placeViewport")}
+            aria-label={t("layouts.placeViewport")}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">crop_free</span>
+            <span className="tb-label">{t("layouts.viewportShort")}</span>
+          </button>
+          <button
+            className="nav-add"
+            data-add-legend
+            disabled={toolInputActive}
+            title={t("legend.add")}
+            aria-label={t("legend.add")}
+            onClick={() => {
+              const id = handlers.onAddLegend({ xMm: 10, yMm: 10 });
+              setSelectedId(null);
+              setSelectedLegendId(id);
+            }}
+          >
+            <span className="material-symbols-outlined" aria-hidden="true">format_list_bulleted</span>
+            <span className="tb-label">{t("layouts.legendShort")}</span>
+          </button>
+          <label className={`nav-add layout-sheet-select${toolInputActive ? " disabled" : ""}`} title={t("sheetTable.add")}>
+            <span className="material-symbols-outlined" aria-hidden="true">table</span>
+            <span className="tb-label">{t("layouts.tableShort")}</span>
+            <span className="material-symbols-outlined layout-sheet-caret" aria-hidden="true">expand_more</span>
+            <select
+              value=""
+              disabled={toolInputActive}
+              aria-label={t("sheetTable.add")}
+              data-table-add
+              onChange={(e) => {
+                const source = e.target.value as LayoutTableSource;
+                if (!source) return;
+                const tb = createTable(`tb-${Date.now()}`, source, sheet.w, sheet.h, layoutTables);
+                handlers.onAddTable(tb);
+                setSelectedTableId(tb.id);
+                setSelectedId(null);
+              }}
+            >
+              <option value="">＋ {t("sheetTable.add")}</option>
+              {TABLE_SOURCES.map((src) => (
+                <option key={src} value={src}>{tableSourceLabel(src)}</option>
+              ))}
+            </select>
+          </label>
+          <button className="nav-add" data-add-image disabled={toolInputActive} title={t("sheetImage.add")} aria-label={t("sheetImage.add")} onClick={() => fileRef.current?.click()}>
+            <span className="material-symbols-outlined" aria-hidden="true">image</span>
+            <span className="tb-label">{t("layouts.imageShort")}</span>
+          </button>
+          <button className="nav-add" data-add-text disabled={toolInputActive || !handlers.onAddText} title={t("sheetText.add.hint")} aria-label={t("sheetText.add")} onClick={() => handlers.onAddText?.()}>
+            <span className="material-symbols-outlined" aria-hidden="true">title</span>
+            <span className="tb-label">{t("layouts.textShort")}</span>
+          </button>
+        </span>
         <input
           ref={fileRef}
           type="file"
@@ -1189,19 +1205,23 @@ export function LayoutSheetPane({
             if (f) void addImageFile(f);
           }}
         />
+        <span className="layout-sheet-sep" aria-hidden="true" />
         <button
           ref={guidesToggleRef}
           className={`nav-add${guidesOpen ? " active" : ""}`}
           data-guides-toggle
           disabled={!canGuides}
           title={canGuides ? t("sheetGuides.title") : t("sheetGuides.needMaster")}
+          aria-label={t("sheetGuides.title")}
           onClick={() => setGuidesOpen((v) => !v)}
         >
-          {t("sheetGuides.title")}
+          <span className="material-symbols-outlined" aria-hidden="true">grid_guides</span>
+          <span className="tb-label">{t("sheetGuides.title")}</span>
         </button>
         <span style={{ flex: 1 }} />
-        <button className="nav-add" onClick={() => planViewRef.current?.fit()} title={t("layouts.fit")}>
-          {t("layouts.fit")}
+        <button className="nav-add" onClick={() => planViewRef.current?.fit()} title={t("layouts.fit")} aria-label={t("layouts.fit")}>
+          <span className="material-symbols-outlined" aria-hidden="true">fit_screen</span>
+          <span className="tb-label">{t("layouts.fit")}</span>
         </button>
       </div>
 

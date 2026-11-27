@@ -381,6 +381,8 @@ const TOOLS_2D: ToolId[] = [
 ];
 const TOOLS_3D: ToolId[] = ["wall", "ceiling", "window", "door", "stair", "room"];
 const COMMANDS_3D = ["column", "traeger", "gelaender", "tree", "circlestotrees", "ceilingopening", "ramp", "roof", "roofhole", "roofwindow", "dormer", "extrude", "revolve", "loft", "solid", "solidbool", "solidtoparts", "sectionline", "viewline", "ansichten", "autodim", "excavation"];
+/** [333] Auf einem Layout-Blatt: nur Zeichnen, Beschriften und Bild — keine Bauteile, keine Konstruktionslinien. */
+const TOOLS_SHEET: ToolId[] = ["line", "polyline", "rect", "circle", "arc", "ellipse", "polygon", "spline", "dimension", "scalebar", "revcloud", "wipeout", "block", "text", "leader", "textbox", "image"];
 const COMMANDS_EDIT = ["move", "copy", "array", "rotate", "mirror", "offset", "multiline", "trim", "break", "split", "extend", "fillet", "chamfer", "join", "defblock", "measure", "erkennen"];
 
 type ToolsView = "list" | "icons";
@@ -401,6 +403,7 @@ export const ToolsPanel = memo(function ToolsPanel() {
   const host = usePanelHostSelect((h) => ({
     activeTool: h.activeTool,
     toolsEnabled: h.toolsEnabled,
+    sheetActive: h.sheetActive,
     activeCommand: h.activeCommand,
   }));
   const onSelectTool = usePanelHostAction("onSelectTool");
@@ -491,18 +494,27 @@ export const ToolsPanel = memo(function ToolsPanel() {
       {/* Auswahl-Werkzeug: immer als volle Zeile zuoberst (meistgenutzt). */}
       <div className="tp-select">{toolButton("select")}</div>
 
-      <section className="tp-section">
-        <div className="tp-section-title">{t("tools.cat.2d")}</div>
-        <div className={bodyClass}>{TOOLS_2D.map(toolButton)}</div>
-      </section>
+      {host.sheetActive ? (
+        <section className="tp-section">
+          <div className="tp-section-title">{t("tools.cat.sheet")}</div>
+          <div className={bodyClass}>{TOOLS_SHEET.map(toolButton)}</div>
+        </section>
+      ) : (
+        <>
+          <section className="tp-section">
+            <div className="tp-section-title">{t("tools.cat.2d")}</div>
+            <div className={bodyClass}>{TOOLS_2D.map(toolButton)}</div>
+          </section>
 
-      <section className="tp-section">
-        <div className="tp-section-title">{t("tools.cat.3d")}</div>
-        <div className={bodyClass}>
-          {TOOLS_3D.map(toolButton)}
-          {COMMANDS_3D.map(commandButton)}
-        </div>
-      </section>
+          <section className="tp-section">
+            <div className="tp-section-title">{t("tools.cat.3d")}</div>
+            <div className={bodyClass}>
+              {TOOLS_3D.map(toolButton)}
+              {COMMANDS_3D.map(commandButton)}
+            </div>
+          </section>
+        </>
+      )}
 
       <section className="tp-section">
         <div className="tp-section-title">{t("tools.cat.edit")}</div>
