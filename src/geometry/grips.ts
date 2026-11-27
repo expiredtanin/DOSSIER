@@ -49,6 +49,8 @@ export type GripRequest =
   // [213] Kamera: 0 = Standpunkt, 1 = Ziel, 2 = Bildwinkel bzw. Sichtbreite (Kern `camera::grip_edit`); `cameraBy` verschiebt Standpunkt und Ziel.
   | { op: "cameraGrip"; id: string; index: number; pt: P }
   | { op: "beamGrip"; id: string; index: number; pt: P }
+  // [333] Stütze: 0 = Mitte, Rechteck 1..4 Ecken + 5 Drehen, Rund 1 = Radius; freier Körper: Ecke bzw. (Index = Eckenzahl) Verschieben.
+  | { op: "columnGrip" | "solidGrip"; id: string; index: number; pt: P }
   | { op: "ceilingSlopeGrip"; id: string; index: number; pt: P }
   | { op: "cameraBy"; id: string; delta: P }
   | { op: "sectionBendDelete"; id: string; index: number }
@@ -119,6 +121,30 @@ export function cameraGripPoints(c: Camera, scaleDenominator: number = DEFAULT_S
 /** [280] Griffe eines Trägers im Grundriss: Anfang, Ende, Mitte (verschiebt den ganzen Träger). */
 export function beamGripPoints(b: { start: Vec2; end: Vec2 }): Vec2[] {
   return [b.start, b.end, { x: (b.start.x + b.end.x) / 2, y: (b.start.y + b.end.y) / 2 }];
+}
+
+/**
+ * [333] Griffe einer Stütze im Grundriss (Kern `grips.rs`, `columnGrip`): 0 = Mitte; Rechteck 1..4 = Ecken (Querschnitt
+ * symmetrisch um die Mitte, im gedrehten Profil-Rahmen) und 5 = Dreh-Griff ausserhalb der +x-Seite; Rund 1 = Radius-Griff.
+ */
+export function columnGripPoints(c: { position: Vec2; rotation?: number; profile: { kind: "rect"; width: number; depth: number } | { kind: "round"; radius: number } }): Vec2[] {
+  const rot = c.rotation ?? 0;
+  const [cos, sin] = [Math.cos(rot), Math.sin(rot)];
+  const at = (lx: number, ly: number): Vec2 => ({ x: c.position.x + lx * cos - ly * sin, y: c.position.y + lx * sin + ly * cos });
+  if (c.profile.kind === "round") return [c.position, at(c.profile.radius, 0)];
+  const [hw, hd] = [c.profile.width / 2, c.profile.depth / 2];
+  return [c.position, at(-hw, -hd), at(hw, -hd), at(hw, hd), at(-hw, hd), at(hw + 0.3, 0)];
+}
+
+/**
+ * [333] Griffe eines freien Körpers im Grundriss (`solidGrip`): die Profil-Ecken, dahinter der Verschiebe-Griff im
+ * Schwerpunkt. Kreis- und B-Rep-Körper: nur der Verschiebe-Griff (Index = Eckenzahl, so zählt auch der Kern).
+ */
+export function solidGripPoints(s: { points: readonly Vec2[]; circle?: unknown; brep?: unknown }): { pts: Vec2[]; first: number } {
+  const n = s.points.length;
+  const c = n ? { x: s.points.reduce((a, p) => a + p.x, 0) / n, y: s.points.reduce((a, p) => a + p.y, 0) / n } : { x: 0, y: 0 };
+  const derived = !!s.circle || !!s.brep;
+  return { pts: derived ? [c] : [...s.points, c], first: derived ? n : 0 };
 }
 
 type Owner = { drawingId?: string; wallId?: string };

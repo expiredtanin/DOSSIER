@@ -53,7 +53,7 @@ import { growRect, meshGripIndices } from "../core";
 import { patchItem, verticalExtents } from "../core";
 import { treeGripPatch, treeGripPoints } from "./treeGrips";
 import { railingGripPatch, railingGripPoints } from "./railingGrips";
-import { beamGripPoints, cameraGripPoints } from "../core";
+import { beamGripPoints, cameraGripPoints, columnGripPoints, solidGripPoints } from "../core";
 import type { Selection } from "./selection";
 
 export interface GripEditFieldsState {
@@ -226,6 +226,10 @@ export function useGripEditing(opts: {
   // [280] Träger liegen im Auswahlkanal der Stützen: ein gewählter einzelner Träger zeigt Anfang-, Ende- und Mitte-Griff.
   const selectedColumnId = single(selection, "columns");
   const selectedBeam = selectedColumnId ? (project.beams ?? []).find((x) => x.id === selectedColumnId && x.floorId === levelId) : undefined;
+  // [333] Stütze und freier Körper: eigene Griffe im Grundriss (Mitte/Ecken/Drehen bzw. Ecken/Verschieben).
+  const selectedColumn = selectedColumnId && !selectedBeam ? (project.columns ?? []).find((x) => x.id === selectedColumnId && x.floorId === levelId) : undefined;
+  const selectedSolidId = single(selection, "solids");
+  const selectedSolid = selectedSolidId ? (project.extrudedSolids ?? []).find((x) => x.id === selectedSolidId && x.levelId === levelId) : undefined;
   const selectedCamera = selectedCameraId ? (project.cameras ?? []).find((x) => x.id === selectedCameraId && x.floorId === levelId) : undefined;
   // [176] Schnitt-/Ansichtslinie im Grundriss: Griffe an Anfang, Knickpunkten (`bendPoints`) und Ende.
   const selectedSectionLineId = single(selection, "sectionLines");
@@ -572,6 +576,16 @@ export function useGripEditing(opts: {
     if (selectedBeam && modelEditable && !selectedBeam.locked) {
       const pts = beamGripPoints(selectedBeam);
       pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
+    if (selectedColumn && modelEditable && !selectedColumn.locked) {
+      const pts = columnGripPoints(selectedColumn);
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, pts.length - 1]); });
+      return pts;
+    }
+    if (selectedSolid && modelEditable) {
+      const { pts, first } = solidGripPoints(selectedSolid);
+      pts.forEach((_, i) => { gripOwners.push({ localIndex: first + i }); gripOwnerRange.push([first, first + pts.length - 1]); });
       return pts;
     }
     if (selectedCamera && modelEditable && !selectedCamera.locked) {
@@ -1335,6 +1349,15 @@ export function useGripEditing(opts: {
     // [280] Träger: Anfang, Ende bzw. Mitte live (Kern `grips.rs`), ein Undo-Schritt je Zug.
     if (selectedBeam) {
       if (!selectedBeam.locked) storeState().moveBeamGrip(selectedBeam.id, index, pt);
+      return;
+    }
+    // [333] Stütze / freier Körper: Griff live über den Kern, ein Undo-Schritt je Zug.
+    if (selectedColumn) {
+      if (!selectedColumn.locked) storeState().moveColumnGrip(selectedColumn.id, index, pt);
+      return;
+    }
+    if (selectedSolid) {
+      storeState().moveSolidGrip(selectedSolid.id, index, pt);
       return;
     }
     // [213] Kamera: Standpunkt, Ziel bzw. Sichtkegel-Rand live (Kern `camera::grip_edit`), ein Undo-Schritt je Zug.

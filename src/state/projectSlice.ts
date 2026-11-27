@@ -396,6 +396,9 @@ export interface ProjectSlice {
   moveCameraGrip: (id: string, index: number, pt: Vec2) => void;
   /** [280] Träger: Griff 0 Anfang, 1 Ende, 2 Mitte (verschiebt den Träger), Kern `grips.rs`. */
   moveBeamGrip: (id: string, index: number, pt: Vec2) => void;
+  /** [333] Stütze (Mitte, Ecken, Drehen/Radius) bzw. freier Körper (Ecke, Verschieben); Kern `grips.rs`. */
+  moveColumnGrip: (id: string, index: number, pt: Vec2) => void;
+  moveSolidGrip: (id: string, index: number, pt: Vec2) => void;
   /** [176] Knick in Segment `seg` (Mittel-Griff) einfügen; `coalesceKey` fasst den anschliessenden Zug zusammen. */
   insertSectionBend: (id: string, seg: number, pt: Vec2, coalesceKey?: string) => void;
   /** [176] Knick löschen (`index` wie bei {@link moveSectionLineGrip}; Anfang/Ende lassen sich nicht löschen). */
@@ -1327,6 +1330,8 @@ export function createProjectSlice(
     moveSectionLineGrip: (id, index, pt, coalesceKey) =>
       applyGrip({ op: "sectionLineGrip", id, index, pt: gripPt(pt) }, coalesceKey ?? `moveSectionLineGrip:${id}:${index}`),
     moveCameraGrip: (id, index, pt) => applyGrip({ op: "cameraGrip", id, index, pt: gripPt(pt) }, `moveCameraGrip:${id}:${index}`),
+    moveColumnGrip: (id, index, pt) => applyGrip({ op: "columnGrip", id, index, pt: gripPt(pt) }, `moveColumnGrip:${id}:${index}`),
+    moveSolidGrip: (id, index, pt) => applyGrip({ op: "solidGrip", id, index, pt: gripPt(pt) }, `moveSolidGrip:${id}:${index}`),
     moveBeamGrip: (id, index, pt) => applyGrip({ op: "beamGrip", id, index, pt: gripPt(pt) }, `moveBeamGrip:${id}:${index}`),
     insertSectionBend: (id, seg, pt, coalesceKey) => applyGrip({ op: "sectionBendInsert", id, seg, pt: gripPt(pt) }, coalesceKey),
     deleteSectionBend: (id, index) => applyGrip({ op: "sectionBendDelete", id, index }),

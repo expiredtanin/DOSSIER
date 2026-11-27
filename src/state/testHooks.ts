@@ -111,6 +111,13 @@ declare global {
       /** [253] Objekte der Bibliothek im Projekt (Id, Lage, Drehung, Parameter, Seed, Klasse) mit Ausmass ihrer Plan-Linien (1:50) im aktiven Geschoss; dazu die Klassen-Codes des Projekts. */
       libobjs: () => { items: { id: string; libId: string; at: { x: number; y: number }; rotation: number; params: Record<string, number | boolean | string>; seed: number | undefined; categoryCode: string; lines: number; w: number; h: number }[]; layers: string[] };
       /** [202] Treppe (Antritt, Zentrum), erster Punkt des ersten Lochs der Decke `ceilingId` und Zahl der Plan-Linien der Treppe im aktiven Geschoss. */
+      /** [333] Lage/Querschnitt der Stützen und Profil-Ecken der freien Körper (Griff-Test). */
+      /** [333] Stützen-Griff ohne Maus auslösen (Testvorbereitung: Stütze aufziehen, damit die Griffe trennbar sind). */
+      columnGrip: (id: string, index: number, x: number, y: number) => void;
+      gripGeom: () => {
+        columns: { id: string; position: { x: number; y: number }; rotation: number; width: number; depth: number; radius: number }[];
+        solids: { id: string; points: { x: number; y: number }[] }[];
+      };
       stairHole: (stairId: string, ceilingId: string) => { start: { x: number; y: number }; center: { x: number; y: number } | null; hole0: { x: number; y: number } | null; lines: number };
       /** [203] Grundriss der aktiven Ebene wie in der Ansicht (Geschoss-Überlagerung nach Zeichnungsebenen-Modus): Raumstempel je Geschoss (gesamt/gedimmt) und Zahl der Achs-Beschriftungen `axis`. */
       planStamps: (axis: string) => { floors: Record<string, { n: number; greyed: number }>; axis: number };
@@ -544,6 +551,18 @@ export function installTestHooks(): void {
       return { wallId: s.project.walls.find((w) => w.floorId === s.activeLevelId)?.id ?? s.project.walls[0]?.id ?? "", visible: vis.sort(), prims: prims.length, wallPrims: prims.filter((q) => !!(q as { wallId?: string }).wallId).length };
     },
     selected: () => ({ drawings: [...getState().selection.drawings], groups: [...getState().selection.groups], all: JSON.stringify(getState().selection) }),
+    columnGrip: (id, index, x, y) => getState().moveColumnGrip(id, index, { x, y }),
+    gripGeom: () => {
+      const p = getState().project;
+      return {
+        columns: (p.columns ?? []).map((c) => ({
+          id: c.id, position: c.position, rotation: c.rotation,
+          width: c.profile.kind === "rect" ? c.profile.width : NaN, depth: c.profile.kind === "rect" ? c.profile.depth : NaN,
+          radius: c.profile.kind === "round" ? c.profile.radius : NaN,
+        })),
+        solids: (p.extrudedSolids ?? []).map((x) => ({ id: x.id, points: x.points })),
+      };
+    },
     stairHole: (stairId, ceilingId) => {
       const s = getState();
       const st = (s.project.stairs ?? []).find((x) => x.id === stairId)!;

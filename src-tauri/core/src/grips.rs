@@ -85,6 +85,74 @@ fn with_geom(d: &Value, g: Value) -> Value {
     with(d, "geom", g)
 }
 
+/// [333] Abstand des Dreh-Griffs eines Bibliotheks-Objekts vom Einfügepunkt (m).
+const LIBOBJ_ROT_ARM: f64 = 0.6;
+
+/// Kleinste Stützenkante/-radius beim Ziehen (m).
+const COLUMN_MIN: f64 = 0.05;
+
+/// [333] Stützen-Griff `index` nach (x, y) ziehen (s. `columnGrip`); `None` = nichts ändern.
+fn column_grip(e: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
+    if truthy(field(e, "locked")) || !(x.is_finite() && y.is_finite()) {
+        return None;
+    }
+    let (px, py) = xy(field(e, "position")?);
+    if index == 0.0 {
+        return Some(with(e, "position", pt(x, y)));
+    }
+    let prof = field(e, "profile")?;
+    let (dx, dy) = (x - px, y - py);
+    match prof.get("kind").and_then(Value::as_str)? {
+        "round" if index == 1.0 => {
+            let rad = jsnum::max(COLUMN_MIN / 2.0, hypot2(dx, dy));
+            Some(with(e, "profile", with(prof, "radius", js_num(rad))))
+        }
+        "rect" if (1.0..=4.0).contains(&index) => {
+            let rot = num_of(field(e, "rotation"));
+            let (c, s) = (jsnum::cos(rot), jsnum::sin(rot));
+            let (lx, ly) = (dx * c + dy * s, -dx * s + dy * c);
+            let w = jsnum::max(COLUMN_MIN, 2.0 * lx.abs());
+            let d = jsnum::max(COLUMN_MIN, 2.0 * ly.abs());
+            Some(with(e, "profile", with_all(prof, vec![("width", js_num(w)), ("depth", js_num(d))])))
+        }
+        "rect" if index == 5.0 => {
+            if hypot2(dx, dy) < 1e-9 {
+                return None;
+            }
+            Some(with(e, "rotation", js_num(jsnum::atan2(dy, dx))))
+        }
+        _ => None,
+    }
+}
+
+/// [333] Griff eines freien Körpers (s. `solidGrip`).
+fn solid_grip(e: &Value, index: f64, x: f64, y: f64) -> Option<Value> {
+    if truthy(field(e, "locked")) || !(x.is_finite() && y.is_finite()) {
+        return None;
+    }
+    let ring = field(e, "points")?.as_array()?;
+    let derived = field(e, "circle").is_some_and(|c| !c.is_null()) || field(e, "brep").is_some_and(|c| !c.is_null());
+    if let Some(i) = index_in(index, ring.len()) {
+        if derived {
+            return None;
+        }
+        return Some(with(e, "points", replace_at(ring, i as f64, &pt(x, y))));
+    }
+    if index != ring.len() as f64 {
+        return None;
+    }
+    let c = ring_centroid(ring);
+    let (dx, dy) = (x - c.0, y - c.1);
+    let moved_e = with(e, "points", moved_all(ring, dx, dy));
+    match field(e, "circle") {
+        Some(circ) if !circ.is_null() => {
+            let (cx, cy) = xy(field(circ, "center")?);
+            Some(with(&moved_e, "circle", with(circ, "center", pt(cx + dx, cy + dy))))
+        }
+        _ => Some(moved_e),
+    }
+}
+
 // ── Anfrage ──────────────────────────────────────────────────────────────────
 
 /// Eine Änderung aus den Griff-Aktionen des Stores (`GripRequest` in `geometry/grips.ts`); Zahlen dürfen
@@ -281,6 +349,19 @@ pub fn run(lk: &Lookup, req: &Request) -> Result<GripResult, String> {
                 })
                 .into()
             }
+        }
+        // [333] Stütze im Grundriss: Griff 0 = Mitte (verschiebt), Rechteck: 1..4 = Ecken (Querschnitt symmetrisch um die Mitte,
+        // im gedrehten Profil-Rahmen: Breite = 2·|lx|, Tiefe = 2·|ly|), 5 = Dreh-Griff auf der lokalen +x-Achse;
+        // Rundprofil: 1 = Radius-Griff.
+        "columnGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("columns", r.s("id"), &|e| column_grip(e, index, x, y)).into()
+        }
+        // [333] Freier Körper im Grundriss: Index < Eckenzahl = Profil-Ecke; Index = Eckenzahl = Verschiebe-Griff (Ziel = neue
+        // Lage des Profil-Mittelpunkts). Kreis- und B-Rep-Körper nur verschieben (ihr Profil ist abgeleitet).
+        "solidGrip" => {
+            let (index, (x, y)) = (r.n("index"), r.p("pt"));
+            patch("extrudedSolids", r.s("id"), &|e| solid_grip(e, index, x, y)).into()
         }
         // [213] Kamera: Griff 0 Standpunkt, 1 Ziel, 2 Bildwinkel/Sichtbreite; `cameraBy` verschiebt Standpunkt und Ziel.
         "cameraGrip" | "cameraBy" => {
@@ -1017,6 +1098,14 @@ fn drawing_grip(d: &Value, index: f64, x: f64, y: f64, scale: f64, free: bool) -
                 return set("width", js_num(jsnum::max(MIN_WIDTH, local_x)));
             }
             set("at", p)
+        }
+        // [333] Bibliotheks-Objekt: Griff 0 = Einfügepunkt (verschiebt), 1 = Dreh-Griff (Richtung Mitte → Griff = Drehung).
+        "libobj" if index == 1.0 => {
+            let (ax, ay) = xy(field(g, "at").unwrap_or(&Value::Null));
+            if hypot2(x - ax, y - ay) < 1e-9 {
+                return None;
+            }
+            set("rotation", js_num(jsnum::atan2(y - ay, x - ax)))
         }
         "kote" | "detailref" | "scalebar" | "pointmarker" | "block" | "libobj" => set("at", p),
         "grid" => {
@@ -1977,7 +2066,12 @@ pub fn drawing_vertices(g: &Value, scale: f64) -> Option<Vec<(f64, f64)>> {
             }
             out
         }
-        "kote" | "detailref" | "scalebar" | "pointmarker" | "block" | "libobj" => vec![p("at")],
+        "libobj" => {
+            let a = p("at");
+            let rot = num_of(field(g, "rotation"));
+            vec![a, (a.0 + LIBOBJ_ROT_ARM * jsnum::cos(rot), a.1 + LIBOBJ_ROT_ARM * jsnum::sin(rot))]
+        }
+        "kote" | "detailref" | "scalebar" | "pointmarker" | "block" => vec![p("at")],
         "grid" => {
             let geom: crate::model::Drawing2DGeom = serde_json::from_value(g.clone()).ok()?;
             let spec = crate::grid::Spec::of(&geom)?;
@@ -2078,6 +2172,61 @@ mod tests {
             Op::Replace { entity, .. } => entity,
             _ => panic!("replace erwartet"),
         }
+    }
+
+    /// [333] Stützen-Griffe: Mitte verschiebt, Ecke setzt Querschnitt symmetrisch (auch gedreht), Rund = Radius, Dreh-Griff.
+    #[test]
+    fn stuetzen_griffe() {
+        let r = root(json!({"columns": [
+            {"id": "c", "position": {"x": 1, "y": 2}, "rotation": 0, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "height": 3},
+            {"id": "k", "position": {"x": 0, "y": 0}, "rotation": 0, "profile": {"kind": "round", "radius": 0.2}, "height": 3},
+            {"id": "g", "position": {"x": 0, "y": 0}, "rotation": 1.5707963267948966, "profile": {"kind": "rect", "width": 0.3, "depth": 0.3}, "height": 3},
+            {"id": "l", "locked": true, "position": {"x": 0, "y": 0}, "rotation": 0, "profile": {"kind": "round", "radius": 0.2}, "height": 3}
+        ]}));
+        let ent = |req: Value| run(&Lookup::plain(&r), &rq(req)).unwrap();
+        let near = |a: f64, b: f64| (a - b).abs() < 1e-9;
+        let e = ent(json!({"op": "columnGrip", "id": "c", "index": 0, "pt": [3, 3]}));
+        assert_eq!(entity(&e)["position"]["x"].as_f64(), Some(3.0));
+        // Ecke nach (+0.25, +0.2) vom Mittelpunkt: 0.5 × 0.4, Mitte bleibt.
+        let e = ent(json!({"op": "columnGrip", "id": "c", "index": 3, "pt": [1.25, 2.2]}));
+        let pr = &entity(&e)["profile"];
+        assert!(near(pr["width"].as_f64().unwrap(), 0.5) && near(pr["depth"].as_f64().unwrap(), 0.4));
+        assert_eq!(entity(&e)["position"]["x"].as_f64(), Some(1.0));
+        // Rund: Radius = Abstand zur Mitte.
+        let e = ent(json!({"op": "columnGrip", "id": "k", "index": 1, "pt": [0.3, 0.4]}));
+        assert!(near(entity(&e)["profile"]["radius"].as_f64().unwrap(), 0.5));
+        // Gedrehtes Profil (90°): lokale x = globale y.
+        let e = ent(json!({"op": "columnGrip", "id": "g", "index": 1, "pt": [0.1, 0.5]}));
+        let pr = &entity(&e)["profile"];
+        assert!(near(pr["width"].as_f64().unwrap(), 1.0) && near(pr["depth"].as_f64().unwrap(), 0.2));
+        // Drehen: Ziel auf +y → 90°.
+        let e = ent(json!({"op": "columnGrip", "id": "c", "index": 5, "pt": [1, 5]}));
+        assert!(near(entity(&e)["rotation"].as_f64().unwrap(), std::f64::consts::FRAC_PI_2));
+        // Nicht vorhandene Griffe, gesperrt, unbekannt.
+        assert!(ent(json!({"op": "columnGrip", "id": "k", "index": 5, "pt": [1, 1]})).ops.is_empty());
+        assert!(ent(json!({"op": "columnGrip", "id": "l", "index": 0, "pt": [1, 1]})).ops.is_empty());
+        assert!(ent(json!({"op": "columnGrip", "id": "x", "index": 0, "pt": [1, 1]})).ops.is_empty());
+    }
+
+    /// [333] Körper-Griffe: Ecke ziehen, Verschiebe-Griff (Schwerpunkt), Kreis nur verschieben.
+    #[test]
+    fn koerper_griffe() {
+        let r = root(json!({"extrudedSolids": [
+            {"id": "s", "points": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 2, "y": 2}, {"x": 0, "y": 2}], "height": 1},
+            {"id": "c", "points": [{"x": 0, "y": 0}, {"x": 2, "y": 0}, {"x": 2, "y": 2}, {"x": 0, "y": 2}], "circle": {"center": {"x": 1, "y": 1}, "r": 1}, "height": 1}
+        ]}));
+        let ent = |req: Value| run(&Lookup::plain(&r), &rq(req)).unwrap();
+        let e = ent(json!({"op": "solidGrip", "id": "s", "index": 2, "pt": [3, 3]}));
+        assert_eq!(entity(&e)["points"][2]["x"].as_f64(), Some(3.0));
+        assert_eq!(entity(&e)["points"][0]["x"].as_f64(), Some(0.0));
+        let e = ent(json!({"op": "solidGrip", "id": "s", "index": 4, "pt": [11, 11]}));
+        assert_eq!(entity(&e)["points"][0]["x"].as_f64(), Some(10.0));
+        assert_eq!(entity(&e)["points"][2]["y"].as_f64(), Some(12.0));
+        assert!(ent(json!({"op": "solidGrip", "id": "s", "index": 5, "pt": [1, 1]})).ops.is_empty());
+        assert!(ent(json!({"op": "solidGrip", "id": "c", "index": 1, "pt": [1, 1]})).ops.is_empty());
+        let e = ent(json!({"op": "solidGrip", "id": "c", "index": 4, "pt": [6, 1]}));
+        assert_eq!(entity(&e)["circle"]["center"]["x"].as_f64(), Some(6.0));
+        assert_eq!(entity(&e)["points"][1]["x"].as_f64(), Some(7.0));
     }
 
     /// [280] Träger: Griff 0 Anfang, 1 Ende, 2 Mitte verschiebt; gesperrt/unbekannt/Index daneben ändern nichts.
@@ -2253,6 +2402,20 @@ mod tests {
         let r = root(json!({"drawings2d": [ar]}));
         let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 4, "pt": [1.4, 1.4], "scale": 100}))).unwrap();
         assert!(entity(&res)["geom"]["textOffsetsMm"][0].is_object());
+    }
+
+    /// [333] Bibliotheks-Objekt: Griff 0 verschiebt, Griff 1 (0.6 m in Blickrichtung) dreht.
+    #[test]
+    fn libobj_griffe() {
+        let d = json!({"id": "d", "level": "L", "geom": {"shape": "libobj", "libId": "lib:x", "at": {"x": 1, "y": 1}, "rotation": 0}});
+        let v = drawing_vertices(d.get("geom").unwrap(), 100.0).unwrap();
+        assert_eq!(v.len(), 2);
+        assert!((v[1].0 - 1.6).abs() < 1e-9 && (v[1].1 - 1.0).abs() < 1e-9, "{v:?}");
+        let r = root(json!({"drawings2d": [d]}));
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 1, "pt": [1, 5], "scale": 100}))).unwrap();
+        assert!((res.ops[0].to_json()["entity"]["geom"]["rotation"].as_f64().unwrap() - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+        let res = run(&Lookup::plain(&r), &rq(json!({"op": "moveGrip", "drawingId": "d", "index": 0, "pt": [3, 4], "scale": 100}))).unwrap();
+        assert_eq!(res.ops[0].to_json()["entity"]["geom"]["at"]["x"].as_f64(), Some(3.0));
     }
 
     /// [T2] Bogenlängen-/Radiusmass: Randpunkte-Griffe bleiben auf dem Kreis um den Mittelpunkt.

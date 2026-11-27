@@ -86,7 +86,7 @@ export { EMPTY_MEMBERSHIP, containingGroupId, expandToGroups, isInsideActiveGrou
 export type { GroupMembership, MemberKind } from "../model/groups";
 export { arcApex, drawingVertices, gripPt, openEdges, polylineEdgeGrips, ringEdges } from "../geometry/grips";
 export { verticalExtents } from "../geometry/grips";
-export { cameraGripPoints, beamGripPoints } from "../geometry/grips";
+export { cameraGripPoints, beamGripPoints, columnGripPoints, solidGripPoints } from "../geometry/grips";
 export type { VerticalExtent } from "../geometry/grips";
 export type { GripRequest, RingKind } from "../geometry/grips";
 export { edgeArcToggle, type ArcRingKind } from "../geometry/grips";
