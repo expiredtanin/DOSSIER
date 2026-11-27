@@ -137,6 +137,7 @@ export function ViewportCenter(props: {
     updateOpening: pa.updateOpening,
     slideOpening: pa.slideOpening,
     sheetHeightGrip: pa.sheetHeightGrip,
+    sheetEndGrip: pa.sheetEndGrip,
     moveStairBy: pa.moveStairBy,
     dragStairParam: pa.dragStairParam,
     moveRoomGrip: pa.moveRoomGrip,

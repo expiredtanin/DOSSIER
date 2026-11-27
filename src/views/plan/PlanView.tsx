@@ -1189,16 +1189,20 @@ export const PlanView = forwardRef<PlanViewHandle, PlanViewProps>(
             return idx.map((i) => {
               const s = toLocal(grips![i]);
               const insert = !!(grips![i] as { insert?: boolean }).insert;
+              // [333] Waagrechter End-Griff im Schnitt: breites flaches Rechteck (links-rechts ziehen), nicht das Quadrat der Höhen-Griffe.
+              const horizontal = !!(grips![i] as { horizontal?: boolean }).horizontal;
               const hover = hoverGrip === i;
               const half = (gripSquareHalfPx(insert, hover) * k * (hover ? 1 : crowd)) / meet;
+              const halfW = horizontal ? half * 1.9 : half;
+              const halfH = horizontal ? half * 0.8 : half;
               return (
                 <rect
                   key={`grip-${i}`}
-                  className={"plan-grip" + (insert ? " plan-grip-insert" : "") + (hover ? " plan-grip-hover" : "")}
-                  x={s.x - half}
-                  y={s.y - half}
-                  width={half * 2}
-                  height={half * 2}
+                  className={"plan-grip" + (insert ? " plan-grip-insert" : "") + (horizontal ? " plan-grip-horizontal" : "") + (hover ? " plan-grip-hover" : "")}
+                  x={s.x - halfW}
+                  y={s.y - halfH}
+                  width={halfW * 2}
+                  height={halfH * 2}
                   pointerEvents="none"
                 />
               );

@@ -64,7 +64,7 @@ import { reorderByIds } from "../model/reorder";
 import { transformMutation } from "../tools/transform";
 import type { CopyMode, TransformOp, TransformSelection } from "../tools/transform";
 import { uniqueId } from "../tools/types";
-import { gripPt, type GripRequest, type RingKind, type SheetHeightKind } from "../core";
+import { gripPt, type GripRequest, type RingKind, type SheetEndKind, type SheetHeightKind } from "../core";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { DEFAULT_PRESETS, type TextStylePreset } from "../text/richText";
 import { t } from "../i18n";
@@ -433,6 +433,8 @@ export interface ProjectSlice {
   setCeilingThickness: (ceilingId: string, thickness: number) => void;
   /** [187] Höhen-Griff im Schnitt/in der Ansicht: Kante `kind` des Bauteils `id` auf die Blatt-Höhe `y` (absolutes Z) ziehen. */
   sheetHeightGrip: (kind: SheetHeightKind, id: string, y: number, free?: boolean, from?: number, index?: number) => void;
+  /** [333] Waagrechter End-Griff im Schnitt: Ende `end` (0 links, 1 rechts) von Decke/Wand um `du` m in u ziehen. */
+  sheetEndGrip: (kind: SheetEndKind, id: string, end: 0 | 1, du: number, base: Vec2, uAxis: Vec2) => void;
 
   // ── Öffnungs-Editieren (Object-Info-Panel) ────────────────────────────────
   /** Generischer immutabler Patch auf eine Öffnung (per ID). */
@@ -1386,6 +1388,9 @@ export function createProjectSlice(
         newId: uniqueId("ct"),
         newName: t("default.ceilingTypeSingle", { thickness: "{t}" }), // {t} setzt der Kern ein
       }),
+
+    sheetEndGrip: (kind, id, end, du, base, uAxis) =>
+      applyGrip({ op: "sheetEnd", kind, id, index: end, a: du, pt: gripPt(base), delta: gripPt(uAxis) }),
 
     // ── Öffnungs-Editieren ────────────────────────────────────────────────
     updateOpening: (id, patch) => applyChange((p) => patchItem(p, "openings", id, patch)),

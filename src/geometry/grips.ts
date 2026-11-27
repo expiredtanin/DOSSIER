@@ -13,7 +13,7 @@ import { core } from "../engine/coreWasm";
 import { toMarkedJson } from "../core/ops";
 import { DEFAULT_SCALE_DENOMINATOR } from "../model/dimension";
 import { textFrameCorners } from "../text/textFrame";
-import type { SheetHeightKind } from "./gripDrag";
+import type { SheetEndKind, SheetHeightKind } from "./gripDrag";
 
 /** Punkt als `[x, y]` (Anfragen an den Kern). */
 type P = [number, number];
@@ -67,6 +67,9 @@ export type GripRequest =
   | { op: "vertexType"; id: string; index: number; vertexType: "corner" | "arc" | "spline" }
   // [187] Höhen-Griff im Schnitt/in der Ansicht: Kante `kind` auf die Blatt-Höhe `a` (absolutes Z) ziehen (Kern `sheet_height.rs`).
   | { op: "sheetHeight"; kind: SheetHeightKind; id: string; a: number; b?: number; index?: number; free?: boolean; newId: string; newName: string }
+  // [333] Waagrechter End-Griff im Schnitt: Ende `index` (0 links, 1 rechts im Blatt) von Decke/Wand um `a` m in u ziehen;
+  // `pt` = Punkt der Schnittlinie (u = 0), `delta` = u-Achse im Grundriss (Kern `sheet_height::end_ops`).
+  | { op: "sheetEnd"; kind: SheetEndKind; id: string; index: number; a: number; pt: P; delta: P }
   | { op: "wallThickness" | "ceilingThickness"; id: string; thickness: number; newId: string; newName: string }
   // [144] Wandöffnung gleiten lassen (Kern `opening_slide`): Griff-Zug nach `pt` bzw. Position `a` ab Wandanfang.
   | { op: "openingSlide"; id: string; pt: P }

@@ -14,10 +14,10 @@ const wall = async (page: Page, id: string) => (await heights(page)).walls.find(
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
 /** Griffe lesen, sobald sie ruhen: nach Undo rechnet der Schnitt asynchron neu, bis dahin stehen sie an alter Stelle. */
-async function gripCentres(page: Page): Promise<{ x: number; y: number }[]> {
+async function gripCentres(page: Page, sel = ".plan-grip:not(.plan-grip-horizontal)"): Promise<{ x: number; y: number }[]> {
   const read = async () =>
     (
-      await page.locator(".plan-grip").evaluateAll((els) =>
+      await page.locator(sel).evaluateAll((els) =>
         els.map((e) => {
           const r = e.getBoundingClientRect();
           return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
@@ -72,7 +72,7 @@ test("Schnitt A-A: Decke, Fenster und Wand haben Höhen-Griffe, Zug = ein Undo-S
   // Decke EG: zwei Griffe nebeneinander (OK links, UK rechts).
   const c0 = await ceiling(page, "c-eg");
   await select(page, { ceilings: ["c-eg"] });
-  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  await expect(page.locator(".plan-grip:not(.plan-grip-horizontal)")).toHaveCount(2);
   const [ok, uk] = await gripCentres(page);
   expect(ok.x).toBeLessThan(uk.x);
 
@@ -86,7 +86,7 @@ test("Schnitt A-A: Decke, Fenster und Wand haben Höhen-Griffe, Zug = ein Undo-S
 
   // UK nach unten: die Decke wird dicker, die OK bleibt; ein Undo-Schritt stellt alles her.
   await select(page, { ceilings: ["c-eg"] });
-  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  await expect(page.locator(".plan-grip:not(.plan-grip-horizontal)")).toHaveCount(2);
   const [, uk2] = await gripCentres(page);
   await dragGrip(page, uk2, 25);
   const c2 = await ceiling(page, "c-eg");
@@ -151,7 +151,7 @@ test("Schnitt A-A: Tab tippt die Kote der Decken-Oberkante", async ({ page }) =>
 
   const c0 = await ceiling(page, "c-eg");
   await select(page, { ceilings: ["c-eg"] });
-  await expect(page.locator(".plan-grip")).toHaveCount(2);
+  await expect(page.locator(".plan-grip:not(.plan-grip-horizontal)")).toHaveCount(2);
   const [ok] = await gripCentres(page);
   await page.mouse.move(ok.x, ok.y);
   await page.mouse.down();
@@ -252,4 +252,35 @@ test("Schnitt A-A: Sohle der Baugrube ziehen", async ({ page }) => {
   expect((await pit()).bottom).toBeLessThan(b0.bottom - 0.05);
   await undo(page);
   await expect.poll(async () => (await pit()).bottom).toBe(b0.bottom);
+});
+
+// [333] Waagrechte End-Griffe: die Decke im Schnitt am Ende anfassen und entlang der Schnittlinie verlängern (das rechte Ende
+// liegt im Viewport am Rand der Ansicht und ist dort nicht greifbar; das rechte Ende deckt der Kern-Test `decke_rechtes_ende…` ab).
+test("Schnitt A-A: Decke am linken Ende waagrecht verlängern, Zug = ein Undo-Schritt", async ({ page }) => {
+  test.setTimeout(180_000);
+  await openSheet(page, "Schnitt A-A");
+  const extent = async () => {
+    const o = await page.evaluate(() => window.__dossierTest!.ceilingOutline("c-eg"));
+    const ys = o.map((p) => p.y);
+    return { y0: Math.min(...ys), y1: Math.max(...ys), n: o.length };
+  };
+  const e0 = await extent();
+  await select(page, { ceilings: ["c-eg"] });
+  await expect(page.locator(".plan-grip-horizontal")).toHaveCount(2);
+  const [left, right] = await gripCentres(page, ".plan-grip-horizontal");
+  expect(left.x).toBeLessThan(right.x);
+  const len = (e: { y0: number; y1: number }) => e.y1 - e.y0; // die Schnittlinie läuft entlang y
+  const drag = async (g: { x: number; y: number }, dx: number) => {
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    await page.mouse.move(g.x + dx, g.y, { steps: 8 });
+    await page.mouse.up();
+    await page.mouse.click(g.x + dx, g.y);
+  };
+  // Linkes Ende nach links ziehen: die Decke wird länger.
+  await drag(left, -40);
+  await expect.poll(async () => len(await extent()) - len(e0)).toBeGreaterThan(0.05);
+  expect((await extent()).n).toBe(e0.n);
+  await undo(page);
+  await expect.poll(async () => JSON.stringify(await extent())).toBe(JSON.stringify(e0));
 });

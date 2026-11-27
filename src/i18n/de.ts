@@ -2770,6 +2770,7 @@ export const de = {
   "cmd.field.length": "Länge",
   "cmd.field.level": "Kote",
   "grip.sheetHeight": "Kote {z} m · Höhe {d} m",
+  "grip.sheetEnd": "Ende {d} m entlang des Schnitts",
   "grip.sheetWallBottomClamped": "Unterkante über Oberkante: Mindesthöhe 0.30 m",
   "cmd.field.angle": "Winkel",
   "cmd.field.width": "Breite",

@@ -40,6 +40,8 @@ declare global {
       selected: () => { drawings: string[]; groups: string[]; all: string };
       /** [144] Öffnungen (id, Wirtswand, Lage ab Wandanfang). */
       openings: () => { id: string; hostWallId: string; position: number }[];
+      /** [333] Umriss einer Decke (Modell-Meter). */
+      ceilingOutline: (id: string) => { x: number; y: number }[];
       /** [187] Höhen von Decken (UK/OK/Dicke), Wänden (UK/OK) und Fenstern (Brüstung/Höhe) aus dem Kern, in Metern (absolutes Z). */
       heights: () => {
         ceilings: { id: string; zBottom: number; zTop: number; thickness: number }[];
@@ -219,6 +221,7 @@ export function installTestHooks(): void {
     polylines: (prefix) =>
       getState().project.drawings2d.flatMap((d) => (d.id.startsWith(prefix) && d.geom.shape === "polyline" ? [{ id: d.id, pts: d.geom.pts }] : [])),
     openings: () => (getState().project.openings ?? []).map((o) => ({ id: o.id, hostWallId: o.hostWallId, position: o.position })),
+    ceilingOutline: (id) => (getState().project.ceilings ?? []).find((c) => c.id === id)?.outline.map((q) => ({ x: q.x, y: q.y })) ?? [],
     heights: () => {
       const p = getState().project;
       const ceilings = p.ceilings ?? [];

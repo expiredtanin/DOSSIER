@@ -35,6 +35,7 @@ import {
   stairParamPoints,
   wallGripPoints,
   type GripLocks,
+  type SheetEndKind,
 } from "../core";
 import { areaMovePreview, drawingMovePreview, transformPreview } from "../tools/transform";
 import { contextAnchor } from "./contextDrag";
@@ -115,6 +116,8 @@ export function useGripEditing(opts: {
   slideOpening: (id: string, to: { position: number } | { pt: Vec2 }, coalesceKey?: string) => void;
   /** [187] Höhen-Griff im Schnitt/in der Ansicht anwenden (Kern `sheet_height.rs`); EIN Aufruf je Zug. */
   sheetHeightGrip: (kind: SheetHeightKind, id: string, y: number, free?: boolean, from?: number, index?: number) => void;
+  /** [333] Waagrechter End-Griff im Schnitt (Kern `sheet_height::end_ops`); EIN Aufruf je Zug. */
+  sheetEndGrip: (kind: SheetEndKind, id: string, end: 0 | 1, du: number, base: Vec2, uAxis: Vec2) => void;
   moveStairBy: (id: string, delta: Vec2) => void;
   /** [151] Parameter-Griff einer Podesttreppe ziehen (Index ohne den Bewegpunkt). */
   dragStairParam?: (id: string, index: number, pt: Vec2) => void;
@@ -173,6 +176,7 @@ export function useGripEditing(opts: {
     updateOpening,
     slideOpening,
     sheetHeightGrip,
+    sheetEndGrip,
     moveStairBy,
     moveRoomGrip,
     moveCeilingGrip,
@@ -447,6 +451,43 @@ export function useGripEditing(opts: {
     return [];
   })();
 
+  // [333] Waagrechte End-Griffe im Schnitt (wie in Archicad): Decke an den Enden ihres Schnitts (Mitte der Dicke) bzw. Wand,
+  // deren Achse höchstens 30° von der Schnittlinie abweicht (Mitte der Höhe). Ziehen verlängert/verkürzt das Bauteil entlang
+  // der Schnittlinie; der Kern (`end_ops`) rechnet beim Loslassen. Nur gerade Schnittlinien (bei Knicken ist u nicht eindeutig).
+  type SheetEndGrip = { kind: SheetEndKind; id: string; end: 0 | 1; pt: Vec2; horizontal: true };
+  const sheetEndGrips: SheetEndGrip[] = (() => {
+    if (modelEditable || !sheet?.base) return [];
+    const lvl = project.drawingLevels.find((l) => l.id === sheet.levelId);
+    if (!lvl || lvl.kind !== "section" || (lvl.bendPoints?.length ?? 0) > 0) return [];
+    const ends = (kind: SheetEndKind, id: string, owner: "wall" | "ceiling", zMid: number): SheetEndGrip[] => {
+      const polys = sheetOwnerOutlines(sheet.levelId, owner, id);
+      let u0 = Infinity, u1 = -Infinity;
+      for (const poly of polys) for (const q of poly) { u0 = Math.min(u0, q.x); u1 = Math.max(u1, q.x); }
+      if (!(u1 > u0)) return [];
+      return [
+        { kind, id, end: 0, pt: { x: u0, y: zMid }, horizontal: true },
+        { kind, id, end: 1, pt: { x: u1, y: zMid }, horizontal: true },
+      ];
+    };
+    if (selectedWallId && selectedWallIds.length <= 1 && !selectedOpeningId) {
+      const w = project.walls.find((x) => x.id === selectedWallId);
+      if (!w || w.locked || w.bulge) return [];
+      const len = Math.hypot(w.end.x - w.start.x, w.end.y - w.start.y);
+      if (len < 1e-6) return [];
+      const cos = Math.abs(((w.end.x - w.start.x) * sheet.uAxis.x + (w.end.y - w.start.y) * sheet.uAxis.y) / len);
+      if (cos < Math.cos((30 * Math.PI) / 180)) return [];
+      const { zBottom, zTop } = verticalExtents(project, [w]).walls[0];
+      return ends("wallEnd", w.id, "wall", (zBottom + zTop) / 2);
+    }
+    if (selectedCeilingId && !selectedOpeningId) {
+      const c = (project.ceilings ?? []).find((x) => x.id === selectedCeilingId);
+      if (!c || c.locked) return [];
+      const { zBottom, zTop } = verticalExtents(project, [], [c]).ceilings[0];
+      return ends("ceilingEdge", c.id, "ceiling", (zBottom + zTop) / 2);
+    }
+    return [];
+  })();
+
   const MAX_INSERT_GRIP_POINTS = 100; // Kataster-Umrisse mit tausenden Punkten: keine Rauten
   const MAX_CONTOUR_GRIPS = 600; // Höhenlinien-Sätze mit tausenden Punkten: gar keine Punkt-Griffe
   /** Anteil entlang der Kante, an dem der Einfüge-Griff sitzt (neben dem Kanten-Anfasser in der Mitte). */
@@ -494,8 +535,9 @@ export function useGripEditing(opts: {
     // verschiebt die Öffnung entlang der Wirts-Wand (siehe applyGrip →
     // `position`). Nur bei genau einer selektierten Öffnung (Auswahl exklusiv).
     if (!modelEditable && effectiveDrawingIds.length === 0) {
-      sheetHeightGrips.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, sheetHeightGrips.length - 1]); });
-      return sheetHeightGrips.map((g) => g.pt);
+      const all: (Vec2 & { horizontal?: boolean })[] = [...sheetHeightGrips.map((g) => g.pt), ...sheetEndGrips.map((g) => ({ ...g.pt, horizontal: true }))];
+      all.forEach((_, i) => { gripOwners.push({ localIndex: i }); gripOwnerRange.push([0, all.length - 1]); });
+      return all;
     }
     if (selectedOpeningId && modelEditable) {
       const op = (project.openings ?? []).find((o) => o.id === selectedOpeningId);
@@ -902,6 +944,8 @@ export function useGripEditing(opts: {
   const pendingOpeningMoveRef = useRef<{ id: string; position: number } | null>(null);
   /** Aufgeschobene Höhen-Änderung im Schnitt (Kante `kind` auf die Höhe `y`, Kern `sheetHeight`). */
   const pendingSheetHeightRef = useRef<{ kind: SheetHeightKind; id: string; y: number; free: boolean; from: number; index?: number } | null>(null);
+  /** [333] Aufgeschobener End-Zug im Schnitt (Ende von Decke/Wand um `du` in u, Kern `sheetEnd`). */
+  const pendingSheetEndRef = useRef<{ kind: SheetEndKind; id: string; end: 0 | 1; du: number } | null>(null);
   /** [187] Kote der gezogenen Kante im laufenden Höhen-Zug (Tab-Feld „Kote“). */
   const sheetDragRef = useRef<{ z: number } | null>(null);
   /** Laufendes Blatt-Delta (u, Meter) eines Zugs im Schnitt (s. moveInSheet). */
@@ -1461,6 +1505,9 @@ export function useGripEditing(opts: {
     const ph = pendingSheetHeightRef.current;
     pendingSheetHeightRef.current = null;
     if (ph) sheetHeightGrip(ph.kind, ph.id, ph.y, ph.free, ph.from, ph.index);
+    const pe = pendingSheetEndRef.current;
+    pendingSheetEndRef.current = null;
+    if (pe && sheet?.base) sheetEndGrip(pe.kind, pe.id, pe.end, pe.du, sheet.base, sheet.uAxis);
     const pc = pendingContourRef.current;
     pendingContourRef.current = null;
     if (pc?.mesh) storeState().moveMeshPoint(pc.id, pc.index, pc.pt);
@@ -1650,6 +1697,7 @@ export function useGripEditing(opts: {
     pendingWallMoveRef.current = null;
     pendingOpeningMoveRef.current = null;
     pendingSheetHeightRef.current = null;
+    pendingSheetEndRef.current = null;
     sheetDragRef.current = null;
     sheetDuRef.current = null;
     pendingBodyRef.current = null;
@@ -1735,6 +1783,29 @@ export function useGripEditing(opts: {
   };
 
   /**
+   * [333] End-Zug anwenden: Blatt-Delta `du` (u, Meter, 1-cm-Raster ausser `free`). Nur Vorschau und HUD — die Umrisse der
+   * Bauteil-Schnittfläche werden am gezogenen Ende um `du` verschoben; das Projekt ändert sich beim Loslassen (Kern `sheetEnd`).
+   */
+  const applySheetEnd = (g: SheetEndGrip, rawU: number, free: boolean) => {
+    const du0 = rawU - g.pt.x;
+    const du = free ? du0 : Math.round(du0 * 100) / 100;
+    pendingSheetEndRef.current = { kind: g.kind, id: g.id, end: g.end, du };
+    const edgeU = g.pt.x;
+    const preview: DraftShape[] = sheetOwnerOutlines(sheet!.levelId, g.kind === "wallEnd" ? "wall" : "ceiling", g.id).map((pts) => ({
+      kind: "poly" as const,
+      // Die Ecken am gezogenen Ende (äusserste u) wandern mit.
+      pts: pts.map((q) => (Math.abs(q.x - edgeU) < 1e-6 ? { x: q.x + du, y: q.y } : q)),
+      closed: true,
+    }));
+    setDraft({
+      preview,
+      vertices: [],
+      snap: null,
+      hud: { at: { x: g.pt.x + du, y: g.pt.y }, text: t("grip.sheetEnd", { d: (du >= 0 ? "+" : "") + du.toFixed(2) }) },
+    });
+  };
+
+  /**
    * [187] Höhen-Zug anwenden: nur Vorschau und HUD (das Projekt ändert sich beim Loslassen, EIN Undo-Schritt).
    * `y` = Blatt-Höhe (absolutes Z); `free` ohne 1-cm-Raster.
    */
@@ -1773,6 +1844,8 @@ export function useGripEditing(opts: {
       // Schnitt/Ansicht ([187]): Höhen-Griff (Wand, Öffnung, Decke).
       if (!modelEditable && sheet) {
         gripDragInfoRef.current = { index, raw };
+        const endGrip = sheetEndGrips[index - sheetHeightGrips.length];
+        if (endGrip) return applySheetEnd(endGrip, raw.x, !!mods.ctrl);
         const typed = gripEditRef.current?.locks.length; // Tab: getippte Kote
         if (typed != null) return applySheetHeight(index, typed, true);
         if (mods.ctrl) return applySheetHeight(index, raw.y, true);
@@ -2057,8 +2130,9 @@ export function useGripEditing(opts: {
     // danach wie onGripEnd aufräumen.
     onGripCancel: (index: number, origin: Vec2) => {
       // Ausstehender Zug: einfach verwerfen (das Projekt wurde nie verändert).
-      if (pendingSheetHeightRef.current) {
+      if (pendingSheetHeightRef.current || pendingSheetEndRef.current) {
         pendingSheetHeightRef.current = null;
+        pendingSheetEndRef.current = null;
       } else if (pendingGripRef.current || pendingWallGripRef.current || pendingAreaGripRef.current || pendingContourRef.current) {
         pendingContourRef.current = null;
         pendingGripRef.current = null;

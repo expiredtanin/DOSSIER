@@ -263,6 +263,91 @@ pub fn ops(lk: &Lookup, kind: &str, id: &str, y: f64, free: bool, new_id: &str, 
     }
 }
 
+/// [333] Waagrechte End-Griffe im Schnitt: das Ende `end` (0 = links, 1 = rechts im Blatt) von Decke (`ceilingEdge`) bzw.
+/// Wand (`wallEnd`) um `du` Meter entlang der u-Achse ziehen. `base` = Punkt der Schnittlinie im Grundriss (u = 0), `u_axis` =
+/// Vektor, in dessen Richtung u im Blatt wächst (bei Blick von der anderen Seite gespiegelt — die Hülle liefert die echte
+/// Achse, der Kern rechnet nur damit). Decke: die vom Schnitt gekreuzte Umrisskante an diesem Ende wandert mit beiden Ecken
+/// um `du · u_axis` (Aussparungen ignoriert); keine kreuzende Kante → nichts. Wand: nur wenn die Achse höchstens 30° von der
+/// Schnittlinie abweicht; der Endpunkt, der im Blatt an diesem Ende liegt, wandert entlang der Achse, sodass seine
+/// u-Projektion um `du` wächst (Verbindungen bleiben unberührt). Bogenwand, gesperrt, Unsinn oder Restlänge < 0.1 m → nichts.
+#[allow(clippy::too_many_arguments)]
+pub fn end_ops(lk: &Lookup, kind: &str, id: &str, end: u8, du: f64, base: [f64; 2], u_axis: [f64; 2]) -> Vec<Op> {
+    let len = u_axis[0].hypot(u_axis[1]);
+    if !du.is_finite() || du == 0.0 || base.iter().any(|v| !v.is_finite()) || !len.is_finite() || len < 1e-9 || end > 1 {
+        return vec![];
+    }
+    let u = [u_axis[0] / len, u_axis[1] / len];
+    let n = [-u[1], u[0]];
+    let u_of = |p: (f64, f64)| (p.0 - base[0]) * u[0] + (p.1 - base[1]) * u[1];
+    let side_of = |p: (f64, f64)| (p.0 - base[0]) * n[0] + (p.1 - base[1]) * n[1];
+    let locked = |e: &Value| truthy(field(e, "locked"));
+    match kind {
+        "ceilingEdge" => {
+            let Some(c) = lk.find("ceilings", id).filter(|c| !locked(c)) else { return vec![] };
+            let raw = arr(field(c, "outline"));
+            let ring: Vec<(f64, f64)> = raw.iter().map(crate::json_util::xy).collect();
+            let n_pts = ring.len();
+            if n_pts < 3 || ring.iter().any(|p| !p.0.is_finite() || !p.1.is_finite()) {
+                return vec![];
+            }
+            // Kante mit dem kleinsten (links) bzw. grössten (rechts) u-Wert der Kreuzung mit der Schnittlinie.
+            let mut best: Option<(usize, f64)> = None;
+            for i in 0..n_pts {
+                let (a, b) = (ring[i], ring[(i + 1) % n_pts]);
+                let (sa, sb) = (side_of(a), side_of(b));
+                if (sa <= 0.0) == (sb <= 0.0) {
+                    continue;
+                }
+                let t = sa / (sa - sb);
+                let ux = u_of(a) + (u_of(b) - u_of(a)) * t;
+                if best.map_or(true, |(_, bu)| if end == 0 { ux < bu } else { ux > bu }) {
+                    best = Some((i, ux));
+                }
+            }
+            let Some((i, _)) = best else { return vec![] };
+            let j = (i + 1) % n_pts;
+            // Nur die zwei Ecken der Kante wandern; die übrigen bleiben unverändert.
+            let outline: Vec<Value> = raw
+                .iter()
+                .enumerate()
+                .map(|(k, v)| if k == i || k == j { crate::json_util::pt(mm(ring[k].0 + du * u[0]), mm(ring[k].1 + du * u[1])) } else { v.clone() })
+                .collect();
+            vec![replace("ceilings", with(c, "outline", Value::Array(outline)))]
+        }
+        "wallEnd" => {
+            let Some(w) = lk.find("walls", id).filter(|w| !locked(w)) else { return vec![] };
+            let bulge = num_of(field(w, "bulge"));
+            if bulge.is_finite() && bulge != 0.0 {
+                return vec![];
+            }
+            let (Some(s), Some(e)) = (field(w, "start").map(crate::json_util::xy), field(w, "end").map(crate::json_util::xy)) else { return vec![] };
+            let axis = (e.0 - s.0, e.1 - s.1);
+            let l = axis.0.hypot(axis.1);
+            if !l.is_finite() || l < 1e-9 {
+                return vec![];
+            }
+            let d = (axis.0 / l, axis.1 / l);
+            let cos = d.0 * u[0] + d.1 * u[1];
+            if cos.abs() < 30f64.to_radians().cos() {
+                return vec![];
+            }
+            // Welcher Endpunkt liegt im Blatt am gewünschten Ende?
+            let start_is_left = u_of(s) <= u_of(e);
+            let move_start = (end == 0) == start_is_left;
+            // Entlang der Achse um `step`: die u-Projektion wächst um step · cos.
+            let step = du / cos;
+            let (new_s, new_e) = if move_start { ((s.0 + d.0 * step, s.1 + d.1 * step), e) } else { (s, (e.0 + d.0 * step, e.1 + d.1 * step)) };
+            let (nl, along) = ((new_e.0 - new_s.0).hypot(new_e.1 - new_s.1), (new_e.0 - new_s.0) * d.0 + (new_e.1 - new_s.1) * d.1);
+            if nl < 0.1 || along <= 0.0 {
+                return vec![];
+            }
+            let (key, p) = if move_start { ("start", new_s) } else { ("end", new_e) };
+            vec![replace("walls", with(w, key, crate::json_util::pt(mm(p.0), mm(p.1))))]
+        }
+        _ => vec![],
+    }
+}
+
 /// Bezugshöhe, die der Schnitt von den Höhen eines Höhenlinien-Satzes abzieht (`terrain::datum` über alle Höhenlinien).
 pub(crate) fn contour_datum(root: &Map<String, Value>, set: &Value) -> f64 {
     let zs: Vec<f64> = arr(field(set, "contours")).iter().map(|c| num_of(field(c, "z"))).collect();
@@ -626,5 +711,93 @@ mod tests {
         assert_eq!(e["bottom"], json!({"mode": "floor", "floorId": "eg", "offset": -1.2}));
         assert_eq!(e["height"], json!(3.8));
         assert_eq!(entity(&run("wallBottom", "w1", 4.0))["height"], json!(0.3));
+    }
+
+    // ── [333] waagrechte End-Griffe ────────────────────────────────────────────────────────────────
+    fn end_root() -> Map<String, Value> {
+        json!({
+            "walls": [
+                {"id": "wp", "start": {"x": 1.0, "y": 0.0}, "end": {"x": 5.0, "y": 0.0}},
+                {"id": "wq", "start": {"x": 0.0, "y": 1.0}, "end": {"x": 0.0, "y": 5.0}},
+                {"id": "wl", "start": {"x": 1.0, "y": 0.0}, "end": {"x": 5.0, "y": 0.0}, "locked": true},
+                {"id": "wr", "start": {"x": 5.0, "y": 0.0}, "end": {"x": 1.0, "y": 0.0}}
+            ],
+            "ceilings": [
+                {"id": "c1", "outline": [{"x": 0.0, "y": -2.0}, {"x": 4.0, "y": -2.0}, {"x": 4.0, "y": 2.0}, {"x": 0.0, "y": 2.0}]}
+            ]
+        })
+        .as_object()
+        .unwrap()
+        .clone()
+    }
+
+    fn end_run(kind: &str, id: &str, end: u8, du: f64, u_axis: [f64; 2]) -> Vec<Op> {
+        let r = end_root();
+        end_ops(&Lookup::plain(&r), kind, id, end, du, [0.0, 0.0], u_axis)
+    }
+
+    fn pts(e: &Value, key: &str) -> Vec<(f64, f64)> {
+        e[key].as_array().unwrap().iter().map(|p| (p["x"].as_f64().unwrap(), p["y"].as_f64().unwrap())).collect()
+    }
+
+    #[test]
+    fn decke_rechtes_ende_waechst_entlang_des_schnitts() {
+        // Schnittlinie = x-Achse (y = 0), u wächst mit x: die Kante x = 4 wandert um +1.
+        let e = entity(&end_run("ceilingEdge", "c1", 1, 1.0, [1.0, 0.0]));
+        assert_eq!(pts(&e, "outline"), vec![(0.0, -2.0), (5.0, -2.0), (5.0, 2.0), (0.0, 2.0)]);
+        // linkes Ende schrumpft (+0.5)
+        let e = entity(&end_run("ceilingEdge", "c1", 0, 0.5, [1.0, 0.0]));
+        assert_eq!(pts(&e, "outline"), vec![(0.5, -2.0), (4.0, -2.0), (4.0, 2.0), (0.5, 2.0)]);
+    }
+
+    #[test]
+    fn decke_gespiegelter_schnitt() {
+        // Blick von der anderen Seite: u wächst mit −x. Das Blatt-rechte Ende ist die Kante x = 0.
+        let e = entity(&end_run("ceilingEdge", "c1", 1, 1.0, [-1.0, 0.0]));
+        assert_eq!(pts(&e, "outline"), vec![(-1.0, -2.0), (4.0, -2.0), (4.0, 2.0), (-1.0, 2.0)]);
+        let e = entity(&end_run("ceilingEdge", "c1", 0, 1.0, [-1.0, 0.0]));
+        assert_eq!(pts(&e, "outline"), vec![(0.0, -2.0), (3.0, -2.0), (3.0, 2.0), (0.0, 2.0)]);
+    }
+
+    #[test]
+    fn decke_ohne_kreuzende_kante_nichts() {
+        let r = end_root();
+        let ops_ = end_ops(&Lookup::plain(&r), "ceilingEdge", "c1", 1, 1.0, [0.0, 9.0], [1.0, 0.0]);
+        assert!(ops_.is_empty());
+        assert!(end_run("ceilingEdge", "c1", 1, 0.0, [1.0, 0.0]).is_empty());
+        assert!(end_run("ceilingEdge", "nix", 1, 1.0, [1.0, 0.0]).is_empty());
+    }
+
+    #[test]
+    fn wand_ende_parallel() {
+        // Rechtes Ende (x = 5) +1 m; u = x.
+        let e = entity(&end_run("wallEnd", "wp", 1, 1.0, [1.0, 0.0]));
+        assert_eq!((e["start"]["x"].as_f64(), e["end"]["x"].as_f64()), (Some(1.0), Some(6.0)));
+        // linkes Ende −0.5 m
+        let e = entity(&end_run("wallEnd", "wp", 0, -0.5, [1.0, 0.0]));
+        assert_eq!((e["start"]["x"].as_f64(), e["end"]["x"].as_f64()), (Some(0.5), Some(5.0)));
+        // Wand läuft gegen u (start rechts): Blatt-rechtes Ende ist `start`.
+        let e = entity(&end_run("wallEnd", "wr", 1, 1.0, [1.0, 0.0]));
+        assert_eq!((e["start"]["x"].as_f64(), e["end"]["x"].as_f64()), (Some(6.0), Some(1.0)));
+        // gespiegelt: u = −x, Blatt-rechtes Ende = kleineres x
+        let e = entity(&end_run("wallEnd", "wp", 1, 1.0, [-1.0, 0.0]));
+        assert_eq!((e["start"]["x"].as_f64(), e["end"]["x"].as_f64()), (Some(0.0), Some(5.0)));
+    }
+
+    #[test]
+    fn wand_quer_gesperrt_oder_zu_kurz_nichts() {
+        assert!(end_run("wallEnd", "wq", 1, 1.0, [1.0, 0.0]).is_empty(), "Wand quer zum Schnitt");
+        assert!(end_run("wallEnd", "wl", 1, 1.0, [1.0, 0.0]).is_empty(), "gesperrt");
+        assert!(end_run("wallEnd", "wp", 1, -3.95, [1.0, 0.0]).is_empty(), "würde fast verschwinden");
+    }
+
+    #[test]
+    fn wand_schraeg() {
+        let mut r = end_root();
+        r.insert("walls".into(), json!([{"id": "ws", "start": {"x": 0.0, "y": 0.0}, "end": {"x": 4.0, "y": 2.0}}]));
+        // Achse 26.6° zur u-Achse: die u-Projektion wächst um du = 1 → Punkt wandert 1/cos entlang der Achse.
+        let e = entity(&end_ops(&Lookup::plain(&r), "wallEnd", "ws", 1, 1.0, [0.0, 0.0], [1.0, 0.0]));
+        assert!((e["end"]["x"].as_f64().unwrap() - 5.0).abs() < 1e-9);
+        assert!((e["end"]["y"].as_f64().unwrap() - 2.5).abs() < 1e-9);
     }
 }

@@ -114,6 +114,9 @@ export type SheetHeightKind =
   // Dach: Traufe, First (bzw. Neigung), Attika; Treppe: Austritt; Gelände: Oberkante (Netz) bzw. Sohle (Baugrube).
   | "roofEave" | "roofTop" | "parapetTop" | "stairTop" | "stairBottom" | "contextTop" | "contextBottom" | "contourLine";
 
+/** [333] Art eines waagrechten End-Griffs im Schnitt: Decken-Kante bzw. Wand-Ende (Kern `sheet_height::end_ops`). */
+export type SheetEndKind = "ceilingEdge" | "wallEnd";
+
 const SHEET_KIND = { wallTop: 0, openingTop: 1, openingBottom: 2, wallBottom: 3, ceilingTop: 4, ceilingBottom: 6,
   roofEave: 7, roofTop: 8, parapetTop: 9, stairTop: 10, stairBottom: 11, contextTop: 4, contextBottom: 7, contourLine: 4 } as const;
 

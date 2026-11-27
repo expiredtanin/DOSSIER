@@ -2758,6 +2758,7 @@ export const en: Record<TranslationKey, string> = {
   "cmd.field.length": "Length",
   "cmd.field.level": "Level",
   "grip.sheetHeight": "Level {z} m · height {d} m",
+  "grip.sheetEnd": "End {d} m along the section",
   "grip.sheetWallBottomClamped": "Bottom above top: minimum height 0.30 m",
   "cmd.field.angle": "Angle",
   "cmd.field.width": "Width",
