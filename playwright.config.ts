@@ -49,10 +49,10 @@ export default defineConfig({
   // über den SVG-Rückfall) und `webgpu` mit SwiftShader über ANGLE/Vulkan — dort zeichnen render2d/render3d wirklich
   // (`e2e/webgpu*.spec.ts`).
   projects: [
-    { name: "chromium", testIgnore: /webgpu\d*\.spec\.ts$/ },
+    { name: "chromium", testIgnore: /(webgpu|grips3d)\d*\.spec\.ts$/ },
     {
       name: "webgpu",
-      testMatch: /webgpu\d*\.spec\.ts$/,
+      testMatch: /(webgpu|grips3d)\d*\.spec\.ts$/,
       use: {
         launchOptions: {
           executablePath: chromiumPath(),

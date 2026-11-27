@@ -20,6 +20,9 @@ import type {
   Layout,
   Project,
   Roof,
+  Stair,
+  Opening,
+  Column,
   Vec2,
   Wall,
 } from "../model/types";
@@ -139,6 +142,10 @@ export const Content = memo(function Content({
   edit3dDrawings,
   edit3dCeilings,
   edit3dRoofs,
+  edit3dStairs,
+  edit3dOpenings,
+  edit3dColumns,
+  onEdit3dElement,
   onEdit3dVertex,
   onEdit3dBody,
   onEdit3dEdge,
@@ -247,6 +254,11 @@ export const Content = memo(function Content({
   /** Alle gewählten Decken — 3D-Eckpunkt-/Kanten-/Verschiebe-Griffe. */
   edit3dCeilings: Ceiling[];
   edit3dRoofs: Roof[];
+  /** [333] Gewählte Treppen/Wandöffnungen/Stützen — 3D-Griffe (Kern-Anfragen wie im Plan). */
+  edit3dStairs: Stair[];
+  edit3dOpenings: Opening[];
+  edit3dColumns: Column[];
+  onEdit3dElement: (target: { stairId?: string; openingId?: string; columnId?: string }, index: number, pt: Vec2) => void;
   onEdit3dVertex: (
     target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string },
     index: number,
@@ -358,6 +370,10 @@ export const Content = memo(function Content({
         editDrawings={edit3dDrawings}
         editCeilings={edit3dCeilings}
         editRoofs={edit3dRoofs}
+        editStairs={edit3dStairs}
+        editOpenings={edit3dOpenings}
+        editColumns={edit3dColumns}
+        onEditElement={onEdit3dElement}
         onEditVertex={onEdit3dVertex}
         onEditBody={onEdit3dBody}
         onEditEdge={onEdit3dEdge}

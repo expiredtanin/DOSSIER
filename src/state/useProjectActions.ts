@@ -392,6 +392,7 @@ export function useProjectActions(
   const sheetEndGrip = useStore((s) => s.sheetEndGrip);
   const updateStair = useStore((s) => s.updateStair);
   const moveStairBy = useStore((s) => s.moveStairBy);
+  const moveColumnGrip = useStore((s) => s.moveColumnGrip);
   const dragStairParam = useStore((s) => s.dragStairParam);
   const updateRoom = useStore((s) => s.updateRoom);
   const moveRoomBy = useStore((s) => s.moveRoomBy);
@@ -517,6 +518,7 @@ export function useProjectActions(
     sheetEndGrip,
     updateStair,
     moveStairBy,
+    moveColumnGrip,
     dragStairParam,
     updateRoom,
     moveRoomBy,

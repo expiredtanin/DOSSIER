@@ -3768,6 +3768,9 @@ export const en: Record<TranslationKey, string> = {
   "viewport3d.grip.height": "Drag height",
   "viewport3d.grip.move": "Move",
   "viewport3d.grip.roofpitch": "Drag roof pitch",
+  "viewport3d.grip.slide": "Slide opening along wall",
+  "viewport3d.grip.stairParam": "Drag stair dimension",
+  "viewport3d.grip.columnSize": "Drag column size",
 
   // ── Element tree (Elements panel, ROADMAP §11) ──────────────────────────────
   "elements.title": "Elements",

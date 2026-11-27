@@ -43,7 +43,7 @@
 // Pixel an der Viewport-Höhe normiert), damit sich beide Pfade gleich anfühlen.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2 } from "../model/types";
+import type { Project, Wall, Drawing2D, Ceiling, Roof, Vec2, Stair, Opening, Column } from "../model/types";
 import { roofBaseElevation, roofGeometry, verticalExtents } from "../core";
 import { projectToModel3d, pickGeometry, draftWorldLines, explodeFloorOffsets, hiddenClassCodes, filter3d } from "../core";
 import type { Hide3d } from "../core";
@@ -66,6 +66,7 @@ import { useWasm3dRenderer } from "./useWasm3dRenderer";
 import { cameraRay, pickNearest, rayPlaneY, rayPlane, worldToScreen } from "./raycast3d";
 import type { Vec3 } from "../core";
 import { drawingGripVertices, drawingMoveAnchor } from "./drawingGrips";
+import { elemExplodeDz, elementGrips3d, type ElemGripTarget } from "./elementGrips3d";
 import { pointCloudSyncItems } from "./pointCloudSync";
 import { usePointClouds } from "../state/pointCloudStore";
 import { sun3dFor, sun3dKey } from "./sun3d";
@@ -133,7 +134,9 @@ type GripKind = "vertex" | "height" | "move" | "edge" | "roofpitch";
 interface Grip {
   kind: GripKind;
   /** Element, dessen Griff das ist (Wand-/Drawing-/Decken-/Dach-ID). */
-  target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string };
+  target: { wallId?: string; drawingId?: string; ceilingId?: string; roofId?: string } & ElemGripTarget;
+  /** [333] Arbeitsebene (Welt-y) bei Treppen-/Öffnungs-/Stützen-Griffen; sonst aus dem Ziel abgeleitet. */
+  planeY?: number;
   /** Vertex-Index (`vertex`) bzw. erster Kanten-Index (`edge`); -1 sonst. */
   index: number;
   /** Zweiter Kanten-Index (nur `kind==="edge"`). */
@@ -151,6 +154,7 @@ function sameGripScreens(a: readonly { grip: Grip; x: number; y: number }[], b: 
     const u = q.grip.target;
     if (p.x !== q.x || p.y !== q.y || p.grip.kind !== q.grip.kind || p.grip.index !== q.grip.index || p.grip.index2 !== q.grip.index2) return false;
     if (t.wallId !== u.wallId || t.drawingId !== u.drawingId || t.ceilingId !== u.ceilingId || t.roofId !== u.roofId) return false;
+    if (t.stairId !== u.stairId || t.openingId !== u.openingId || t.columnId !== u.columnId) return false;
     const [x, y, z] = p.grip.pos;
     if (x !== q.grip.pos[0] || y !== q.grip.pos[1] || z !== q.grip.pos[2]) return false;
   }
@@ -211,11 +215,18 @@ function computeGrips(
   drawingElevation: number,
   /** Explosionsaxonometrie ([65]): Versatz je Geschoss-id; Griffe sitzen auf den gehobenen Bauteilen. */
   floorOffsets: Readonly<Record<string, number>> = {},
+  /** [333] Gewählte Treppen/Öffnungen/Stützen. */
+  elems: { stairs: readonly Stair[]; openings: readonly Opening[]; columns: readonly Column[] } = { stairs: [], openings: [], columns: [] },
 ): Grip[] {
   const out = computeGripsAt(project, walls, drawings, ceilings, roofs, drawingElevation);
   for (const g of out) {
     const dz = explodeGripDz(project, floorOffsets, g.target);
     if (dz !== 0) g.pos = [g.pos[0], g.pos[1] + dz, g.pos[2]];
+  }
+  // [333] Treppe/Öffnung/Stütze: Lage und Ebene mit Explosionsversatz (Ebene = Höhe, auf der gezogen wird).
+  for (const e of elementGrips3d(project, elems.stairs, elems.openings, elems.columns)) {
+    const dz = elemExplodeDz(project, floorOffsets, e.target);
+    out.push({ kind: e.kind, target: e.target, index: e.index, pos: [e.pos[0], e.pos[1] + dz, e.pos[2]], planeY: e.planeY + dz });
   }
   return out;
 }
@@ -408,6 +419,10 @@ export function Wasm3DViewport({
   editDrawings = [],
   editCeilings = [],
   editRoofs = [],
+  editStairs = [],
+  editOpenings = [],
+  editColumns = [],
+  onEditElement,
   onEditVertex,
   onEditBody,
   onEditEdge,
@@ -470,6 +485,12 @@ export function Wasm3DViewport({
   editCeilings?: Ceiling[];
   /** Gewählte Dächer — Quelle der 3D-Eckpunkt-/Verschiebe-/First-Griffe. */
   editRoofs?: Roof[];
+  /** [333] Gewählte Treppen/Wandöffnungen/Stützen — Quelle ihrer 3D-Griffe. */
+  editStairs?: Stair[];
+  editOpenings?: Opening[];
+  editColumns?: Column[];
+  /** [333] Griff von Treppe/Öffnung/Stütze gezogen: Griff-Index und Punkt (Modell-m) auf der Griff-Ebene. */
+  onEditElement?: (target: ElemGripTarget, index: number, pt: Vec2) => void;
   /**
    * Endpunkt-Griff gezogen: neuer XY-Modellpunkt für den Vertex `index` des
    * Elements. Optionale `excludeWallIds`/`excludeDrawingIds` = Koinzidenz-
@@ -576,6 +597,14 @@ export function Wasm3DViewport({
   editCeilingsRef.current = editCeilings;
   const editRoofsRef = useRef(editRoofs);
   editRoofsRef.current = editRoofs;
+  const editStairsRef = useRef(editStairs);
+  editStairsRef.current = editStairs;
+  const editOpeningsRef = useRef(editOpenings);
+  editOpeningsRef.current = editOpenings;
+  const editColumnsRef = useRef(editColumns);
+  editColumnsRef.current = editColumns;
+  const onEditElementRef = useRef(onEditElement);
+  onEditElementRef.current = onEditElement;
   const onEditVertexRef = useRef(onEditVertex);
   onEditVertexRef.current = onEditVertex;
   const onEditBodyRef = useRef(onEditBody);
@@ -1003,7 +1032,10 @@ export function Wasm3DViewport({
       (editWalls.length === 0 &&
         editDrawings.length === 0 &&
         editCeilings.length === 0 &&
-        editRoofs.length === 0)
+        editRoofs.length === 0 &&
+        editStairs.length === 0 &&
+        editOpenings.length === 0 &&
+        editColumns.length === 0)
     ) {
       setGripScreens([]);
       return;
@@ -1024,6 +1056,7 @@ export function Wasm3DViewport({
             editRoofsRef.current,
             groundElevationRef.current,
             floorOffsetsRef.current,
+            { stairs: editStairsRef.current, openings: editOpeningsRef.current, columns: editColumnsRef.current },
           );
           const next: { grip: Grip; x: number; y: number }[] = [];
           for (const g of grips) {
@@ -1038,7 +1071,7 @@ export function Wasm3DViewport({
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [ready, editWalls, editDrawings, editCeilings, editRoofs]);
+  }, [ready, editWalls, editDrawings, editCeilings, editRoofs, editStairs, editOpenings, editColumns]);
 
   // Cursor-HUD-Bildschirmposition (Länge/Winkel beim Zeichnen ODER Δx/Δy/
   // Länge-Winkel während eines Griff-Drags, s. `hudFields`-Doc): derselbe
@@ -1160,6 +1193,7 @@ export function Wasm3DViewport({
         moveCoincident: MoveCoincidentVertex[];
       }
     | { kind: "edge"; ceilingId: string; a: number; b: number; planeY: number; lastModel: Vec2 | null }
+    | { kind: "elem"; target: ElemGripTarget; index: number; planeY: number }
     | { kind: "height"; wallId: string }
     | { kind: "roofpitch"; roofId: string; apexXZ: readonly [number, number] };
   const gripDragRef = useRef<GripDrag | null>(null);
@@ -1204,7 +1238,11 @@ export function Wasm3DViewport({
       endGripDrag();
       return;
     }
-    if (grip.kind === "height") {
+    if (grip.target.stairId || grip.target.openingId || grip.target.columnId) {
+      // [333] Treppe/Öffnung/Stütze: Strahl auf die waagrechte Griff-Ebene, der Kern rechnet den Zug (wie im Plan).
+      if (grip.planeY == null) return;
+      gripDragRef.current = { kind: "elem", target: grip.target, index: grip.index, planeY: grip.planeY };
+    } else if (grip.kind === "height") {
       if (!grip.target.wallId) return;
       gripDragRef.current = { kind: "height", wallId: grip.target.wallId };
     } else if (grip.kind === "roofpitch") {
@@ -1321,6 +1359,12 @@ export function Wasm3DViewport({
     const hit = rayPlaneY(ray, drag.planeY);
     if (!hit) return;
     const model: Vec2 = { x: hit[0], y: hit[2] };
+    if (drag.kind === "elem") {
+      const et = drag.target;
+      // Ein Undo-Schritt je Zug: gleicher Schlüssel (Aktionen coalescen zusätzlich über ihren eigenen).
+      editGroup(`grip3dElem:${et.stairId ?? et.openingId ?? et.columnId}:${drag.index}`, () => onEditElementRef.current?.(et, drag.index, model));
+      return;
+    }
     if (drag.kind === "vertex") {
       // Pfeiltasten-Achsen-Lock (s. Datei-Kommentar an `axisLockRef`) hat
       // Vorrang vor Shift — ein bewusst per Taste gewählter Anker/Achse soll
@@ -2139,10 +2183,16 @@ export function Wasm3DViewport({
         const glyphStrokeWidth = grip.kind === "edge" ? 1.5 : 1.75;
         return (
           <div
-            key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId ?? grip.target.roofId}:${grip.index}`}
+            key={`${grip.kind}:${grip.target.wallId ?? grip.target.drawingId ?? grip.target.ceilingId ?? grip.target.roofId ?? grip.target.stairId ?? grip.target.openingId ?? grip.target.columnId}:${grip.index}`}
             onPointerDown={startGripDrag(grip)}
             title={t(
-              grip.kind === "height"
+              grip.target.openingId
+                ? "viewport3d.grip.slide"
+                : grip.target.stairId && grip.kind === "vertex"
+                ? "viewport3d.grip.stairParam"
+                : grip.target.columnId && grip.kind === "vertex"
+                ? "viewport3d.grip.columnSize"
+                : grip.kind === "height"
                 ? "viewport3d.grip.height"
                 : grip.kind === "roofpitch"
                 ? "viewport3d.grip.roofpitch"

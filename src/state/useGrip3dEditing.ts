@@ -6,10 +6,11 @@
 // Bezeichner englisch, Kommentare deutsch (CONVENTIONS.md).
 
 import { useMemo, useRef, useState, type RefObject } from "react";
-import type { Ceiling, Drawing2D, Project, Roof, Vec2, Wall } from "../model/types";
+import type { Ceiling, Column, Drawing2D, Opening, Project, Roof, Stair, Vec2, Wall } from "../model/types";
 import type { SnapResult, SnapSettings, ToolDraft } from "../tools/types";
 import { computeSnap } from "../tools/snapping";
-import { roofBaseElevation, roofGeometry } from "../core";
+import { roofBaseElevation, roofGeometry, stairMoveHandle } from "../core";
+import type { ElemGripTarget } from "../viewport/elementGrips3d";
 import {
   neighbor3dVertex,
   bodyMoveAnchor,
@@ -48,6 +49,10 @@ export function useGrip3dEditing(opts: {
   moveGripOf: Actions["moveGripOf"];
   moveElementByOf: Actions["moveElementByOf"];
   updateWall: Actions["updateWall"];
+  moveStairBy: Actions["moveStairBy"];
+  dragStairParam: Actions["dragStairParam"];
+  slideOpening: Actions["slideOpening"];
+  moveColumnGrip: Actions["moveColumnGrip"];
 }) {
   const {
     project,
@@ -67,8 +72,13 @@ export function useGrip3dEditing(opts: {
     moveGripOf,
     moveElementByOf,
     updateWall,
+    moveStairBy,
+    dragStairParam,
+    slideOpening,
+    moveColumnGrip,
   } = opts;
   const { walls: selectedWallIds, drawings: selectedDrawingIds, ceilings: selectedCeilingIds, roofs: selectedRoofIds } = selection;
+  const { stairs: selectedStairIds, openings: selectedOpeningIds, columns: selectedColumnIds } = selection;
   // ── 3D-Editier-Griffe (direkt im Viewport3D) ──────────────────────────────
   // Genau EINE gewählte Wand (kein 2D-Element) bzw. genau EIN 2D-Element liefert
   // die Quelle der 3D-Griffe. Dieselben Store-Actions wie bei den Plan-Griffen
@@ -121,6 +131,38 @@ export function useGrip3dEditing(opts: {
         : [],
     [selectedWallIds, selectedDrawingIds, selectedCeilingIds, selectedRoofIds, project.roofs],
   );
+  // [333] Treppen, Wandöffnungen und Stützen: Griffe nur, wenn sonst nichts mit eigenen 3D-Griffen gewählt ist
+  // (eindeutiger Editierfokus). Gesperrte Elemente zeigt `elementGrips3d` nicht.
+  const noOtherGrips =
+    selectedWallIds.length === 0 && selectedDrawingIds.length === 0 && selectedCeilingIds.length === 0 && selectedRoofIds.length === 0;
+  const edit3dStairs = useMemo(
+    () => (noOtherGrips ? selectedStairIds.map((id) => (project.stairs ?? []).find((s) => s.id === id)).filter((s): s is Stair => !!s) : []),
+    [noOtherGrips, selectedStairIds, project.stairs],
+  );
+  const edit3dOpenings = useMemo(
+    () => (noOtherGrips ? selectedOpeningIds.map((id) => (project.openings ?? []).find((o) => o.id === id)).filter((o): o is Opening => !!o) : []),
+    [noOtherGrips, selectedOpeningIds, project.openings],
+  );
+  const edit3dColumns = useMemo(
+    () => (noOtherGrips ? selectedColumnIds.map((id) => (project.columns ?? []).find((c) => c.id === id)).filter((c): c is Column => !!c) : []),
+    [noOtherGrips, selectedColumnIds, project.columns],
+  );
+  // Griff von Treppe/Öffnung/Stütze ziehen: derselbe Kern-Zug wie im Plan (`stairBy`/`stairParam`/`openingSlide`/`columnGrip`),
+  // `pt` = Strahl-Treffpunkt auf der Griff-Ebene in Modell-Metern. Ein Undo-Schritt je Zug über den coalesceKey der Aktion.
+  const onEdit3dElement = (target: ElemGripTarget, index: number, pt: Vec2) => {
+    if (target.stairId) {
+      const st = (project.stairs ?? []).find((s) => s.id === target.stairId);
+      if (!st || st.locked) return;
+      if (index > 0) dragStairParam(st.id, index - 1, pt);
+      else moveStairBy(st.id, { x: pt.x - stairMoveHandle(st).x, y: pt.y - stairMoveHandle(st).y });
+    } else if (target.openingId) {
+      const op = (project.openings ?? []).find((o) => o.id === target.openingId);
+      if (op && !op.locked) slideOpening(op.id, { pt }, `slideOpening:${op.id}`);
+    } else if (target.columnId) {
+      const c = (project.columns ?? []).find((x) => x.id === target.columnId);
+      if (c && !c.locked) moveColumnGrip(c.id, index, pt);
+    }
+  };
   // Snap beim 3D-Vertex-Drag: dieselbe computeSnap-Logik wie die Plan-Griffe.
   // Das/die gerade GEZOGENEN Element(e) werden aus den Snap-Quellen genommen
   // (sonst fängt der Punkt an sich selbst). `excludeWallIds`/`excludeDrawingIds`
@@ -415,6 +457,10 @@ export function useGrip3dEditing(opts: {
     edit3dDrawings,
     edit3dCeilings,
     edit3dRoofs,
+    edit3dStairs,
+    edit3dOpenings,
+    edit3dColumns,
+    onEdit3dElement: useEvent(onEdit3dElement),
     grip3dEdit,
     setGrip3dEdit,
     last3dDragRef,

@@ -44,6 +44,10 @@ type DerivedContentProps =
   | "edit3dDrawings"
   | "edit3dCeilings"
   | "edit3dRoofs"
+  | "edit3dStairs"
+  | "edit3dOpenings"
+  | "edit3dColumns"
+  | "onEdit3dElement"
   | "onEdit3dVertex"
   | "onEdit3dBody"
   | "onEdit3dEdge"
@@ -191,9 +195,13 @@ export function ViewportCenter(props: {
     moveGripOf: pa.moveGripOf,
     moveElementByOf: pa.moveElementByOf,
     updateWall: pa.updateWall,
+    moveStairBy: pa.moveStairBy,
+    dragStairParam: pa.dragStairParam,
+    slideOpening: pa.slideOpening,
+    moveColumnGrip: pa.moveColumnGrip,
   });
   const {
-    edit3dWalls, edit3dDrawings, edit3dCeilings, edit3dRoofs, onEdit3dVertex, onEdit3dBody, onEdit3dEdge,
+    edit3dWalls, edit3dDrawings, edit3dCeilings, edit3dRoofs, edit3dStairs, edit3dOpenings, edit3dColumns, onEdit3dElement, onEdit3dVertex, onEdit3dBody, onEdit3dEdge,
     onEdit3dRoofPitch, onEdit3dWallTop, onEdit3dEnd, cycleGrip3dEditField, cancelGrip3dEdit,
   } = grip3d;
 
@@ -232,6 +240,10 @@ export function ViewportCenter(props: {
         edit3dDrawings={edit3dDrawings}
         edit3dCeilings={edit3dCeilings}
         edit3dRoofs={edit3dRoofs}
+        edit3dStairs={edit3dStairs}
+        edit3dOpenings={edit3dOpenings}
+        edit3dColumns={edit3dColumns}
+        onEdit3dElement={onEdit3dElement}
         onEdit3dVertex={onEdit3dVertex}
         onEdit3dBody={onEdit3dBody}
         onEdit3dEdge={onEdit3dEdge}

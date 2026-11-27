@@ -3781,6 +3781,9 @@ export const de = {
   "viewport3d.grip.move": "Verschieben",
   "viewport3d.grip.edge": "Kante ziehen",
   "viewport3d.grip.roofpitch": "Dachneigung ziehen",
+  "viewport3d.grip.slide": "Öffnung in der Wand verschieben",
+  "viewport3d.grip.stairParam": "Treppenmass ziehen",
+  "viewport3d.grip.columnSize": "Stützengrösse ziehen",
 
   // ── Element-Baum (Elemente-Panel, ROADMAP §11) ──────────────────────────────
   "elements.title": "Elemente",

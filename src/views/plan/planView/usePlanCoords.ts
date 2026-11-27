@@ -8,6 +8,7 @@ import type { ViewBox__plan_planView_geometry as ViewBox, ClientMap } from "../.
 import type { Vec2, EdgeGrip } from "../../../model/types";
 import type { BodyTarget } from "./types";
 import { GRIP_HIT_PX } from "./constants";
+import { pickGripIndex } from "./gripPick";
 import { createCursorStore } from "../../../state/cursorStore";
 import type { GripHandlers } from "./types";
 import type { PlanViewHandle } from "./types";
@@ -302,12 +303,16 @@ export function usePlanCoords(inp: UsePlanCoordsArgs) {
   // Index des Griffs unter dem Cursor (Bildschirm-Pixel) oder null.
   const gripAt = (clientX: number, clientY: number): number | null => {
     if (!grips) return null;
-    for (let i = 0; i < grips.length; i++) {
-      const vb = toScreen(grips[i]);
-      const c = vbToClient(vb.x, vb.y);
-      if (Math.hypot(c.x - clientX, c.y - clientY) <= GRIP_HIT_PX) return i;
-    }
-    return null;
+    // [333] Nächster Griff gewinnt (kleine Stütze: Ecke statt Mitte), s. `gripPick.ts`.
+    return pickGripIndex(
+      grips.map((g) => {
+        const vb = toScreen(g);
+        return vbToClient(vb.x, vb.y);
+      }),
+      clientX,
+      clientY,
+      GRIP_HIT_PX,
+    );
   };
   // Bildschirm-Versatz (viewBox-Einheiten) eines Kanten-Anfassers entlang seiner
   // Normale: das Dreieck sitzt etwas AUSSERHALB der Kante. Y wird gespiegelt
