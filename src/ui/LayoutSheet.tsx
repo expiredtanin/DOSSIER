@@ -93,12 +93,15 @@ export function ViewportPlanSvg({
   viewport,
   rect,
   contentFixed = false,
+  panMm = null,
 }: {
   project: Project;
   viewport: LayoutViewport;
   rect: RectMm;
   /** [333] Rahmen wird gerade in der Grösse geändert: Inhalt bleibt auf dem Papier liegen (Vorschau wie InDesign). */
   contentFixed?: boolean;
+  /** [333] Inhalt im Rahmen wird gerade verschoben (Papier-mm, Vorschau des Inhalts-Griffs). */
+  panMm?: { x: number; y: number } | null;
 }) {
   const ref = useRef<SVGGElement>(null);
   // Aktuelle Lage für das asynchron eintreffende SVG (Schnitt) — sonst sässe es bis zum nächsten Render falsch.
@@ -109,13 +112,17 @@ export function ViewportPlanSvg({
     if (!r) return placeInner(el, rectRef.current);
     // Bildmitte jetzt: eigene (`center`), sonst die beim Erzeugen; beim Grössen-Ziehen mitwandernd (Inhalt fest).
     const own = viewport.center && Number.isFinite(viewport.center.x) && Number.isFinite(viewport.center.y) ? viewport.center : r.center;
-    const c = contentFixedRef.current ? resizedCenter(own, vpRect(viewport), rectRef.current, r.scale) : own;
+    const fixed = contentFixedRef.current ? resizedCenter(own, vpRect(viewport), rectRef.current, r.scale) : own;
+    const pan = panRef.current;
+    const c = pan ? pannedCenter(fixed, pan, r.scale) : fixed;
     placeInner(el, rectRef.current, viewportViewBox(rectRef.current, c, r.rect, r.center, r.scale));
   };
   const rectRef = useRef(rect);
   rectRef.current = rect;
   const contentFixedRef = useRef(contentFixed);
   contentFixedRef.current = contentFixed;
+  const panRef = useRef(panMm);
+  panRef.current = panMm;
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -162,6 +169,12 @@ export function ViewportPlanSvg({
     place();
   });
   return <g ref={ref} pointerEvents="none" />;
+}
+
+/** [333] Bildmitte, wenn der Inhalt um `pan` (Papier-mm, y nach unten) im Rahmen verschoben wird: die Mitte wandert gegenläufig. */
+function pannedCenter(c: { x: number; y: number }, pan: { x: number; y: number }, scale: number): { x: number; y: number } {
+  const m = scale / 1000;
+  return { x: c.x - pan.x * m, y: c.y + pan.y * m };
 }
 
 /**
@@ -545,6 +558,38 @@ export function LayoutSheetPane({
     window.addEventListener("pointercancel", up);
   };
 
+  // [333] Inhalts-Griff (wie InDesign): Inhalt im Rahmen verschieben, der Rahmen bleibt. Beim Loslassen wandert die Bildmitte.
+  const [contentPan, setContentPan] = useState<{ id: string; x: number; y: number } | null>(null);
+  const startContentPan = (e: ReactPointerEvent<SVGElement>, vp: LayoutViewport) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    e.preventDefault();
+    const grab = toMm(e.clientX, e.clientY);
+    if (!grab) return;
+    let last = { x: 0, y: 0 };
+    const move = (ev: PointerEvent) => {
+      const mm = toMm(ev.clientX, ev.clientY);
+      if (!mm) return;
+      last = { x: mm.xMm - grab.xMm, y: mm.yMm - grab.yMm };
+      setContentPan({ id: vp.id, ...last });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setContentPan(null);
+      const shown = renderedViewports.get(vp.id);
+      const cur = layout.viewports.find((v) => v.id === vp.id) ?? vp;
+      const own = cur.center && Number.isFinite(cur.center.x) && Number.isFinite(cur.center.y) ? cur.center : shown?.center;
+      if (!own || !shown || (Math.abs(last.x) < 0.05 && Math.abs(last.y) < 0.05)) return;
+      const c = pannedCenter(own, last, shown.scale);
+      handlers.onPatchViewport(vp.id, { center: { x: Math.round(c.x * 1000) / 1000, y: Math.round(c.y * 1000) / 1000 } });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+
   const startDrag = (e: ReactPointerEvent<SVGElement>, drag: Drag) => {
     if (e.button !== 0) return; // Mitte = Schwenken der Plan-Ansicht
     e.stopPropagation();
@@ -794,6 +839,7 @@ export function LayoutSheetPane({
                   viewport={vp}
                   rect={r}
                   contentFixed={!!preview && preview.drag.mode === "edit" && preview.drag.id === vp.id && preview.drag.handle !== "body"}
+                  panMm={contentPan && contentPan.id === vp.id ? contentPan : null}
                 />
               ) : (
                 <g pointerEvents="none">
@@ -947,6 +993,19 @@ export function LayoutSheetPane({
                 }}
               />
             ))}
+            {(() => {
+              // [333] Inhalts-Griff in der Rahmenmitte (Ring wie InDesign): zieht den Plan im Rahmen, der Rahmen bleibt.
+              const r = displayRect(selectedVp);
+              const cx = r.xMm + r.widthMm / 2;
+              const cy = r.yMm + r.heightMm / 2;
+              return (
+                <g style={{ cursor: "grab" }} data-viewport-content-grip onPointerDown={(e) => startContentPan(e, selectedVp)}>
+                  <title>{t("layouts.moveContent")}</title>
+                  <circle cx={cx} cy={cy} r={grip * 1.3} fill="rgba(255,255,255,0.85)" stroke={ACCENT} strokeWidth={hair * 1.5} />
+                  <circle cx={cx} cy={cy} r={grip * 0.45} fill={ACCENT} />
+                </g>
+              );
+            })()}
           </g>
         )}
         {/* Gewähltes Bild: Körper verschieben, Ecke unten rechts skalieren; im Zuschnitt-Modus Griffe am Ausschnitt. */}

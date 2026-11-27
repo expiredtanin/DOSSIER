@@ -3862,6 +3862,7 @@ export const de = {
   // Editor
   "layouts.editorTitle": "Layout-Editor",
   "layouts.fit": "Einpassen",
+  "layouts.moveContent": "Inhalt im Rahmen verschieben",
   "layouts.insert": "Einfügen",
   "layouts.viewportShort": "Ansicht",
   "layouts.legendShort": "Legende",
